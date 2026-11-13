@@ -9,6 +9,13 @@ from wan_dns_sync.health import HealthState, start_health_server
 
 
 class TestHealthState:
+    def test_liveness_allows_for_the_wait_before_verification(self) -> None:
+        """A cycle that sleeps verify_delay must not look hung."""
+        assert (
+            HealthState(interval=60, verify_delay=120).stale_after
+            == HealthState(interval=60).stale_after + 120
+        )
+
     def test_not_ready_before_the_first_cycle(self) -> None:
         state = HealthState(interval=60)
         assert state.alive() is True

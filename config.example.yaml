@@ -19,10 +19,11 @@ opnsense:
 
 # DNS providers are octoDNS provider classes. Every key besides `class` is passed
 # to the provider as it is, so see the provider's own documentation for the options.
+# Every ${VAR} in the file must be set, used or not, so keep only the providers you run.
 providers:
-  desec:
-    class: octodns_desec.DesecProvider
-    token: "${DESEC_TOKEN}"
+  # desec:
+  #   class: octodns_desec.DesecProvider
+  #   token: "${DESEC_TOKEN}"
   hetzner:
     class: octodns_hetzner.HetznerProvider
     token: "${HCLOUD_TOKEN}"
@@ -33,7 +34,8 @@ zones:
   example.com:
     # Every listed provider is written. Use [hetzner, desec] while moving a zone.
     providers: [hetzner]
-    # TTL for the A records, in seconds (check the provider's minimum)
+    # TTL for the A records, in seconds. deSEC refuses a TTL below the domain's
+    # minimum_ttl (900 on one zone checked), so read it before choosing.
     ttl: 300
     # Only these records are ever created, changed or deleted. Everything else in the zone is left alone.
     records:
@@ -53,8 +55,10 @@ settings:
   dry_run: false
   # HTTP health endpoint port (for Kubernetes probes); null disables it
   health_port: null
-  # Seconds to wait before checking the zone's nameservers after a change
-  verify_delay: 2.0
+  # Seconds to wait before checking the zone's nameservers after a change. deSEC's two
+  # nameservers took about 105 s to agree in a live test, so a shorter wait fails the check
+  # and it is retried next cycle.
+  verify_delay: 120
   # Publish addresses that are not globally routable (private, CGNAT, ...). Off by default.
   allow_private_ips: false
 

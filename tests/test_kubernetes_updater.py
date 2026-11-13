@@ -241,6 +241,39 @@ class TestUpdateApexDnsAnnotations:
 
         assert_patched(custom_api.patch_namespaced_custom_object)
 
+    def _run_with(self, networking_api: MagicMock, custom_api: MagicMock) -> bool:
+        with (
+            patch("wan_dns_sync.kubernetes_updater.config.load_incluster_config"),
+            patch(
+                "wan_dns_sync.kubernetes_updater.client.NetworkingV1Api",
+                return_value=networking_api,
+            ),
+            patch(
+                "wan_dns_sync.kubernetes_updater.client.CustomObjectsApi",
+                return_value=custom_api,
+            ),
+        ):
+            return update_apex_dns_annotations(["5.6.7.8", "1.2.3.4"], SELECTOR)
+
+    def test_a_cluster_without_the_httproute_api_is_not_a_failure(self) -> None:
+        """No Gateway API CRD: the list is a 404, and the ingresses were still updated."""
+        networking_api = make_networking_api(None)
+        custom_api = make_custom_api(None)
+        custom_api.list_cluster_custom_object.side_effect = ApiException(status=404)
+
+        assert self._run_with(networking_api, custom_api) is True
+
+        assert_patched(networking_api.patch_namespaced_ingress)
+        custom_api.patch_namespaced_custom_object.assert_not_called()
+
+    def test_any_other_httproute_list_error_still_fails(self) -> None:
+        networking_api = make_networking_api(None)
+        custom_api = make_custom_api(None)
+        custom_api.list_cluster_custom_object.side_effect = ApiException(status=500)
+
+        with pytest.raises(KubernetesUpdateError, match="listing httproutes: HTTP 500"):
+            self._run_with(networking_api, custom_api)
+
     @pytest.mark.parametrize(
         "failing",
         [

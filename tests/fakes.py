@@ -25,6 +25,7 @@ class FakeProvider(BaseProvider):  # type: ignore[misc]
         self.zones = zones if zones is not None else {}
         self.applied: list[Any] = []
         self.fail_apply: Exception | None = None
+        self.fail_after_apply: Exception | None = None  # the write lands, the response is lost
 
     def _stored(self, zone_name: str) -> dict[tuple[str, str], RecordData] | None:
         """The stored records of a zone, found with or without its trailing dot."""
@@ -60,3 +61,5 @@ class FakeProvider(BaseProvider):  # type: ignore[misc]
                 stored.pop(key, None)
             else:
                 stored[key] = {"ttl": change.new.ttl, "values": list(change.new.values)}
+        if self.fail_after_apply:
+            raise self.fail_after_apply

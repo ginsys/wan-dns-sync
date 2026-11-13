@@ -254,6 +254,17 @@ class _LoopbackDNS:
             response.answer.append(dns.rrset.from_text(name, 60, "IN", "A", "10.0.0.1"))
         return response
 
+    @staticmethod
+    def _recv_exact(conn: socket.socket, size: int) -> bytes:
+        """TCP delivers a stream: a read may return fewer bytes than were sent."""
+        data = b""
+        while len(data) < size:
+            chunk = conn.recv(size - len(data))
+            if not chunk:
+                raise OSError("connection closed mid-message")
+            data += chunk
+        return data
+
     def _serve_udp(self) -> None:
         try:
             wire, addr = self.udp.recvfrom(512)
@@ -265,8 +276,9 @@ class _LoopbackDNS:
         try:
             conn, _ = self.tcp.accept()
             with conn:
-                length = int.from_bytes(conn.recv(2), "big")
-                wire = conn.recv(length)
+                conn.settimeout(5)
+                length = int.from_bytes(self._recv_exact(conn, 2), "big")
+                wire = self._recv_exact(conn, length)
                 data = self._reply(wire, self.tcp_flags, True).to_wire()
                 conn.sendall(len(data).to_bytes(2, "big") + data)
         except OSError:
@@ -280,6 +292,8 @@ class _LoopbackDNS:
     def __exit__(self, *exc: object) -> None:
         self.udp.close()
         self.tcp.close()
+        for thread in self.threads:
+            thread.join(timeout=10)
 
 
 def _resolver_on(port: int) -> type[dns.resolver.Resolver]:

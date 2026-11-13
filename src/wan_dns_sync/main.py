@@ -124,6 +124,7 @@ class Updater:
         self._clock = clock
         self._last_applied: Desired | None = None
         self._last_reconcile = 0.0
+        self._unverified: set[str] = set()  # zones written but not yet seen at every nameserver
 
     def _desired(self, interface_ips: dict[str, str]) -> Desired:
         """Addresses per owned record. A record with none is left out, so it is never deleted."""
@@ -155,6 +156,7 @@ class Updater:
         any_changes = False
         for zone, owned in desired.items():
             if not owned:
+                self._unverified.discard(zone)
                 continue
             zone_config = self.config.zones[zone]
             zone_changed = False
@@ -175,12 +177,20 @@ class Updater:
                         error_type=type(e).__name__,
                         error=str(e),
                     )
-            if zone_changed and not self.dry_run:
+            if self.dry_run:
+                continue
+            if zone_changed:
                 any_changes = True
+                self._unverified.add(zone)
                 self._sleep(self.config.settings.verify_delay)
-                for name, addresses in owned.items():
-                    if not self._verify(name, zone, set(addresses)):
-                        ok = False
+            if zone in self._unverified:
+                # A zone stays unverified until a check passes: the retry finds no
+                # change to apply, and must not read that as a verified zone.
+                results = [self._verify(name, zone, set(a)) for name, a in owned.items()]
+                if all(results):
+                    self._unverified.discard(zone)
+                else:
+                    ok = False
         if not any_changes:
             logger.info("No DNS changes applied")
         return ok

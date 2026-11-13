@@ -108,11 +108,13 @@ class TestLoadConfig:
         with pytest.raises(FileNotFoundError):
             load_config(tmp_path / "nonexistent.yaml")
 
-    def test_invalid_yaml(self, tmp_path: Path) -> None:
+    def test_invalid_yaml_error_does_not_quote_the_file(self, tmp_path: Path) -> None:
         config_file = tmp_path / "config.yaml"
-        config_file.write_text("invalid: yaml: content:")
-        with pytest.raises(Exception):  # noqa: B017 - any parse or validation failure
+        config_file.write_text("opnsense:\n  secret: SENTINEL_SECRET: broken\n")
+        with pytest.raises(ValueError, match="not valid YAML at line 2") as exc:
             load_config(config_file)
+        assert "SENTINEL_SECRET" not in str(exc.value)
+        assert exc.value.__cause__ is None and exc.value.__suppress_context__
 
 
 class TestValidation:
@@ -138,6 +140,69 @@ class TestValidation:
     def test_secret_not_in_repr(self, sample_config: Config) -> None:
         assert "test-secret" not in repr(sample_config)
         assert sample_config.opnsense.secret.get_secret_value() == "test-secret"
+
+    def test_provider_token_not_in_repr(self) -> None:
+        config = make_config(
+            providers={"fake": {"class": "tests.fakes.FakeProvider", "token": "SENTINEL_TOKEN"}}
+        )
+        assert "SENTINEL_TOKEN" not in repr(config)
+        assert config.providers["fake"]["token"] == "SENTINEL_TOKEN"
+
+    def test_control_character_in_a_provider_argument_is_rejected_without_echo(self) -> None:
+        with pytest.raises(ValidationError, match="control character") as exc:
+            make_config(
+                providers={"fake": {"class": "tests.fakes.FakeProvider", "token": "SENTINEL\n"}}
+            )
+        assert "SENTINEL" not in str(exc.value)
+
+    def test_control_character_in_an_opnsense_credential_is_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="control character"):
+            make_config(
+                opnsense={
+                    "url": "https://opnsense.local/api",
+                    "key": "k",
+                    "secret": "s\r\n",
+                    "interfaces": {"wan1": "wan"},
+                }
+            )
+
+    def test_record_and_zone_names_are_canonical(self) -> None:
+        config = make_config(
+            zones={
+                "Example.COM.": {
+                    "providers": ["fake"],
+                    "records": [{"name": " Office ", "interfaces": ["wan1"]}],
+                }
+            }
+        )
+        assert list(config.zones) == ["example.com"]
+        assert config.zones["example.com"].records[0].name == "office"
+
+    @pytest.mark.parametrize("name", ["office.", "@", "", "a b", "a..b", "-a", "a\x00"])
+    def test_malformed_record_name_is_rejected(self, name: str) -> None:
+        with pytest.raises(ValidationError):
+            make_config(
+                zones={
+                    "example.com": {
+                        "providers": ["fake"],
+                        "records": [{"name": name, "interfaces": ["wan1"]}],
+                    }
+                }
+            )
+
+    def test_names_differing_only_by_case_are_a_duplicate(self) -> None:
+        with pytest.raises(ValidationError, match="listed twice"):
+            make_config(
+                zones={
+                    "example.com": {
+                        "providers": ["fake"],
+                        "records": [
+                            {"name": "Office", "interfaces": ["wan1"]},
+                            {"name": "office", "interfaces": ["wan2"]},
+                        ],
+                    }
+                }
+            )
 
     def test_zone_with_unknown_provider(self) -> None:
         with pytest.raises(ValidationError, match="unknown provider 'nope'"):

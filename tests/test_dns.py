@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
+from octodns.record import Record
 
 from tests.fakes import FakeProvider
 from wan_dns_sync.dns import DNSError, load_provider, sync_zone
@@ -48,6 +51,26 @@ class TestOwnership:
         sync_zone(provider, ZONE, {"multi": ["5.6.7.8", "1.2.3.4"]}, 300, dry_run=False)
 
         assert provider.zones[ZONE][("multi", "A")]["values"] == ["1.2.3.4", "5.6.7.8"]
+
+
+class AddsUnownedRecord(FakeProvider):
+    """A provider whose plan holds a change to a record this tool does not own."""
+
+    def _process_desired_zone(self, desired: Any) -> Any:
+        extra = Record.new(desired, "extra", {"type": "TXT", "ttl": 300, "values": ["x"]})
+        desired.add_record(extra, lenient=True)
+        return super()._process_desired_zone(desired)
+
+
+class TestStrayChangeRefusal:
+    def test_a_plan_touching_an_unowned_record_is_refused_and_not_applied(self) -> None:
+        provider = AddsUnownedRecord("p", {ZONE: {}})
+
+        with pytest.raises(DNSError, match="does not own"):
+            sync_zone(provider, ZONE, {"office": ["1.2.3.4"]}, 300, dry_run=False)
+
+        assert provider.applied == []
+        assert provider.zones[ZONE] == {}
 
 
 class TestChanges:

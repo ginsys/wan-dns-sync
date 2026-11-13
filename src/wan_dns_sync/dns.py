@@ -39,6 +39,23 @@ def load_provider(name: str, args: dict[str, Any]) -> BaseProvider:
     return provider
 
 
+def _forbid_zone_creation(provider: BaseProvider) -> None:
+    """Make the provider's own create-zone call fail.
+
+    The listing check above can be stale by the time ``apply`` runs (the zone may be
+    deleted in between), and Hetzner's apply then creates it. The providers are made
+    fresh for every sync, so replacing the method on this instance is safe.
+    """
+
+    def refuse(*args: Any, **kwargs: Any) -> Any:
+        raise DNSError(f"provider {provider.id} tried to create a zone; this tool never does")
+
+    for holder_name, method in (("_client", "zone_create"), ("desec_api", "create_domain")):
+        holder = getattr(provider, holder_name, None)
+        if holder is not None and hasattr(holder, method):
+            setattr(holder, method, refuse)
+
+
 class OwnedOnly(BaseProcessor):  # type: ignore[misc]
     """Keep only the owned (name, type) pairs in the provider's existing records."""
 
@@ -66,13 +83,14 @@ def sync_zone(
     Raises ``DNSError`` when the zone is missing at the provider: a provider
     would create it on apply, which this tool never wants.
     """
-    zone_fqdn = zone.rstrip(".") + "."
+    zone_fqdn = zone.rstrip(".").lower() + "."
     try:
-        available = {z.rstrip(".") for z in provider.list_zones()}
+        available = {z.rstrip(".").lower() for z in provider.list_zones()}
     except NotImplementedError as e:
         raise DNSError(f"provider {provider.id} cannot list its zones") from e
     if zone_fqdn.rstrip(".") not in available:
         raise DNSError(f"zone {zone} does not exist at provider {provider.id}")
+    _forbid_zone_creation(provider)
 
     desired = Zone(zone_fqdn, [])
     for name, addresses in owned.items():

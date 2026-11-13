@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import dns.resolver
 
 from wan_dns_sync import verify
-from wan_dns_sync.verify import verify_a_records, zone_nameserver_ips
+from wan_dns_sync.verify import verify_a_records, zone_nameservers
 
 
 def _answer(*items: object) -> MagicMock:
@@ -28,66 +28,107 @@ def _ns(target: str) -> MagicMock:
     return rdata
 
 
-class TestZoneNameserverIps:
+class TestZoneNameservers:
     def test_resolves_every_ns_of_the_zone(self) -> None:
         def resolve(name: str, rdtype: str) -> MagicMock:
             if rdtype == "NS":
                 return _answer(_ns("ns1.example.net."), _ns("ns2.example.net."))
+            if rdtype == "AAAA":
+                raise dns.resolver.NoAnswer()
             addresses = {"ns1.example.net.": "1.1.1.1", "ns2.example.net.": "2.2.2.2"}
             return _answer(_rdata(addresses[name]))
 
         with patch("dns.resolver.Resolver") as resolver:
             resolver.return_value.resolve = resolve
-            assert zone_nameserver_ips("example.com") == ["1.1.1.1", "2.2.2.2"]
+            assert zone_nameservers("example.com") == {
+                "ns1.example.net.": ["1.1.1.1"],
+                "ns2.example.net.": ["2.2.2.2"],
+            }
+
+    def test_ipv6_only_nameserver_is_kept(self) -> None:
+        def resolve(name: str, rdtype: str) -> MagicMock:
+            if rdtype == "NS":
+                return _answer(_ns("v6.example.net."))
+            if rdtype == "A":
+                raise dns.resolver.NoAnswer()
+            return _answer(_rdata("2001:db8::1"))
+
+        with patch("dns.resolver.Resolver") as resolver:
+            resolver.return_value.resolve = resolve
+            assert zone_nameservers("example.com") == {"v6.example.net.": ["2001:db8::1"]}
 
     def test_ns_lookup_failure_returns_nothing(self) -> None:
         with patch("dns.resolver.Resolver") as resolver:
             resolver.return_value.resolve.side_effect = dns.resolver.NXDOMAIN()
-            assert zone_nameserver_ips("example.com") == []
+            assert zone_nameservers("example.com") == {}
 
-    def test_one_unresolvable_nameserver_is_skipped(self) -> None:
+    def test_unresolvable_nameserver_is_kept_with_no_address(self) -> None:
         def resolve(name: str, rdtype: str) -> MagicMock:
             if rdtype == "NS":
                 return _answer(_ns("bad.example.net."), _ns("ns2.example.net."))
             if name == "bad.example.net.":
                 raise dns.resolver.NXDOMAIN()
+            if rdtype == "AAAA":
+                raise dns.resolver.NoAnswer()
             return _answer(_rdata("2.2.2.2"))
 
         with patch("dns.resolver.Resolver") as resolver:
             resolver.return_value.resolve = resolve
-            assert zone_nameserver_ips("example.com") == ["2.2.2.2"]
+            assert zone_nameservers("example.com") == {
+                "bad.example.net.": [],
+                "ns2.example.net.": ["2.2.2.2"],
+            }
 
 
 class TestVerifyARecords:
     def test_all_nameservers_match(self) -> None:
+        servers = {"ns1.": ["1.1.1.1"], "ns2.": ["2.2.2.2"]}
         with (
-            patch.object(verify, "zone_nameserver_ips", return_value=["1.1.1.1", "2.2.2.2"]),
+            patch.object(verify, "zone_nameservers", return_value=servers),
             patch.object(verify, "_answers", return_value={"10.0.0.1"}),
         ):
             assert verify_a_records("test", "example.com", {"10.0.0.1"}) is True
 
     def test_one_nameserver_disagrees(self) -> None:
         answers = {"1.1.1.1": {"10.0.0.1"}, "2.2.2.2": {"10.0.0.9"}}
+        servers = {"ns1.": ["1.1.1.1"], "ns2.": ["2.2.2.2"]}
         with (
-            patch.object(verify, "zone_nameserver_ips", return_value=["1.1.1.1", "2.2.2.2"]),
+            patch.object(verify, "zone_nameservers", return_value=servers),
+            patch.object(verify, "_answers", side_effect=lambda ns, f, t: answers[ns]),
+        ):
+            assert verify_a_records("test", "example.com", {"10.0.0.1"}) is False
+
+    def test_a_nameserver_without_an_address_fails_even_when_the_others_match(self) -> None:
+        servers = {"bad.": [], "ns2.": ["2.2.2.2"]}
+        with (
+            patch.object(verify, "zone_nameservers", return_value=servers),
+            patch.object(verify, "_answers", return_value={"10.0.0.1"}),
+        ):
+            assert verify_a_records("test", "example.com", {"10.0.0.1"}) is False
+
+    def test_every_address_of_a_nameserver_is_checked(self) -> None:
+        answers = {"2.2.2.2": {"10.0.0.1"}, "2001:db8::2": {"10.0.0.9"}}
+        servers = {"ns2.": ["2.2.2.2", "2001:db8::2"]}
+        with (
+            patch.object(verify, "zone_nameservers", return_value=servers),
             patch.object(verify, "_answers", side_effect=lambda ns, f, t: answers[ns]),
         ):
             assert verify_a_records("test", "example.com", {"10.0.0.1"}) is False
 
     def test_nameserver_error_fails(self) -> None:
         with (
-            patch.object(verify, "zone_nameserver_ips", return_value=["1.1.1.1"]),
+            patch.object(verify, "zone_nameservers", return_value={"ns1.": ["1.1.1.1"]}),
             patch.object(verify, "_answers", side_effect=TimeoutError("slow")),
         ):
             assert verify_a_records("test", "example.com", {"10.0.0.1"}) is False
 
     def test_no_nameservers_fails(self) -> None:
-        with patch.object(verify, "zone_nameserver_ips", return_value=[]):
+        with patch.object(verify, "zone_nameservers", return_value={}):
             assert verify_a_records("test", "example.com", {"10.0.0.1"}) is False
 
     def test_queries_the_full_name(self) -> None:
         with (
-            patch.object(verify, "zone_nameserver_ips", return_value=["1.1.1.1"]),
+            patch.object(verify, "zone_nameservers", return_value={"ns1.": ["1.1.1.1"]}),
             patch.object(verify, "_answers", return_value={"10.0.0.1"}) as answers,
         ):
             verify_a_records("test", "example.com", {"10.0.0.1"})

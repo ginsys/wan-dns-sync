@@ -135,12 +135,13 @@ class FakeHcloud:
         self.record_reads = 0
         self.create_zone = MagicMock()
         self.upserts: list[Any] = []
+        self.hide_from_zone_get = False  # the zone is listed, then gone when it is fetched
 
     def domains(self) -> list[dict[str, Any]]:
         return [{"name": name} for name in self.zones]
 
     def zone_get(self, name: str) -> dict[str, Any]:
-        if name not in self.zones:
+        if name not in self.zones or self.hide_from_zone_get:
             from octodns_hetzner.exceptions import HetznerClientNotFound
 
             raise HetznerClientNotFound()
@@ -181,6 +182,15 @@ class TestHetzner:
 
         client.create_zone.assert_not_called()
         assert client.upserts == []
+
+    def test_zone_deleted_between_listing_and_apply_is_not_created(self) -> None:
+        client = FakeHcloud({ZONE: []})
+        client.hide_from_zone_get = True
+
+        with pytest.raises(DNSError):
+            sync_zone(_hetzner_provider(client), ZONE, {"office": ["1.2.3.4"]}, 300, False)
+
+        client.create_zone.assert_not_called()
 
     def test_a_new_provider_instance_reads_the_zone_again(self) -> None:
         """The provider caches a zone's records, so one instance never sees drift."""

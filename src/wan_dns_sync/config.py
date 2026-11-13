@@ -7,7 +7,7 @@ from pathlib import Path
 import yaml
 from pydantic import BaseModel, Field
 
-DEFAULT_CONFIG_PATH = Path("/etc/opnsense-dyndns-hetzner/config.yaml")
+DEFAULT_CONFIG_PATH = Path("/etc/wan-dns-sync/config.yaml")
 
 
 class OPNsenseConfig(BaseModel):

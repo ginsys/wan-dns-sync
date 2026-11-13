@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from opnsense_dyndns_hetzner.ratelimit import RateLimiter
+from wan_dns_sync.ratelimit import RateLimiter
 
 
 class FakeClock:
@@ -24,8 +24,8 @@ class FakeClock:
 def clock(monkeypatch: pytest.MonkeyPatch) -> FakeClock:
     """Patch RateLimiter's time module to a fake clock."""
     fake = FakeClock()
-    monkeypatch.setattr("opnsense_dyndns_hetzner.ratelimit.time.monotonic", fake.monotonic)
-    monkeypatch.setattr("opnsense_dyndns_hetzner.ratelimit.time.sleep", fake.sleep)
+    monkeypatch.setattr("wan_dns_sync.ratelimit.time.monotonic", fake.monotonic)
+    monkeypatch.setattr("wan_dns_sync.ratelimit.time.sleep", fake.sleep)
     return fake
 
 

@@ -9,8 +9,8 @@ import httpx
 import pytest
 import respx
 
-from opnsense_dyndns_hetzner.config import OPNsenseConfig
-from opnsense_dyndns_hetzner.opnsense import OPNsenseClient
+from wan_dns_sync.config import OPNsenseConfig
+from wan_dns_sync.opnsense import OPNsenseClient
 
 
 @pytest.fixture

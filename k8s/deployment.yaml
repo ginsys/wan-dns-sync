@@ -1,28 +1,28 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: opnsense-dyndns-hetzner
+  name: wan-dns-sync
   labels:
-    app: opnsense-dyndns-hetzner
+    app: wan-dns-sync
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: opnsense-dyndns-hetzner
+      app: wan-dns-sync
   template:
     metadata:
       labels:
-        app: opnsense-dyndns-hetzner
+        app: wan-dns-sync
     spec:
       containers:
-        - name: opnsense-dyndns-hetzner
-          image: opnsense-dyndns-hetzner:latest
+        - name: wan-dns-sync
+          image: wan-dns-sync:latest
           args:
             - --config
-            - /etc/opnsense-dyndns-hetzner/config.yaml
+            - /etc/wan-dns-sync/config.yaml
           envFrom:
             - secretRef:
-                name: opnsense-dyndns-hetzner-secrets
+                name: wan-dns-sync-secrets
           ports:
             - containerPort: 8080
               name: health
@@ -44,7 +44,7 @@ spec:
             failureThreshold: 3
           volumeMounts:
             - name: config
-              mountPath: /etc/opnsense-dyndns-hetzner
+              mountPath: /etc/wan-dns-sync
               readOnly: true
           resources:
             requests:
@@ -56,4 +56,4 @@ spec:
       volumes:
         - name: config
           configMap:
-            name: opnsense-dyndns-hetzner-config
+            name: wan-dns-sync-config

@@ -1,1 +1,1 @@
-"""Tests for opnsense-dyndns-hetzner."""
+"""Tests for wan-dns-sync."""

@@ -1,7 +1,7 @@
 [project]
-name = "opnsense-dyndns-hetzner"
+name = "wan-dns-sync"
 version = "0.4.0"
-description = "Dynamic DNS updater for Hetzner Cloud DNS using OPNsense WAN interface IPs"
+description = "Sync OPNsense WAN interface IPs to DNS A records (currently Hetzner Cloud DNS)"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -26,7 +26,7 @@ dev = [
 ]
 
 [project.scripts]
-odh = "opnsense_dyndns_hetzner.main:main"
+wan-dns-sync = "wan_dns_sync.main:main"
 
 [build-system]
 requires = ["hatchling"]

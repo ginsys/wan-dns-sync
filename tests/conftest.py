@@ -1,4 +1,4 @@
-"""Shared pytest fixtures for opnsense-dyndns-hetzner tests."""
+"""Shared pytest fixtures for wan-dns-sync tests."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from opnsense_dyndns_hetzner.config import (
+from wan_dns_sync.config import (
     Config,
     HetznerConfig,
     OPNsenseConfig,

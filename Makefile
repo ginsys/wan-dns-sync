@@ -59,19 +59,19 @@ clean:
 	rm -rf build/ dist/ *.egg-info .pytest_cache .mypy_cache .ruff_cache
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 
-IMAGE := ghcr.io/ginsys/opnsense-dyndns-hetzner
+IMAGE := ghcr.io/ginsys/wan-dns-sync
 
 build:
 	docker build -t $(IMAGE) .
 
 run: $(VENV)/bin/activate
-	$(VENV)/bin/odh --config config.example.yaml --once --dry-run --log-level debug
+	$(VENV)/bin/wan-dns-sync --config config.example.yaml --once --dry-run --log-level debug
 
 test-run: build
 	@test -f .env || (echo "Error: .env file not found. Copy .env.example to .env and fill in values." && exit 1)
 	docker run --rm -it \
 		--env-file .env \
-		-v $(PWD)/config.test.yaml:/etc/opnsense-dyndns-hetzner/config.yaml:ro \
+		-v $(PWD)/config.test.yaml:/etc/wan-dns-sync/config.yaml:ro \
 		-p 8080:8080 \
 		$(IMAGE) \
 		--once --log-level debug

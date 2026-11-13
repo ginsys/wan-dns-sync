@@ -16,7 +16,7 @@ from octodns.provider.base import BaseProvider
 
 from . import __version__
 from .config import DEFAULT_CONFIG_PATH, Config, load_config
-from .dns import load_provider, sync_zone
+from .dns import WriteUncertainError, load_provider, sync_zone
 from .health import HealthState, start_health_server
 from .kubernetes_updater import update_apex_dns_annotations
 from .opnsense import OPNsenseClient
@@ -158,6 +158,7 @@ class Updater:
         for zone, owned in desired.items():
             zone_config = self.config.zones[zone]
             written = False  # a write was made, or may have been (an apply that raised)
+            zone_ok = True
             for provider_name in zone_config.providers if owned else []:
                 try:
                     provider = self._load_provider(
@@ -166,8 +167,9 @@ class Updater:
                     if sync_zone(provider, zone, owned, zone_config.ttl, self.dry_run):
                         any_changes = written = True
                 except Exception as e:
-                    ok = False
-                    written = True
+                    ok = zone_ok = False
+                    # Only a failed apply may have written; a failure before it wrote nothing.
+                    written = written or isinstance(e, WriteUncertainError)
                     logger.error(
                         "Failed to sync DNS records",
                         zone=zone,
@@ -184,6 +186,12 @@ class Updater:
                 pending = self._unverified.setdefault(zone, {})
                 pending.update({name: set(addresses) for name, addresses in owned.items()})
                 self._sleep(self.config.settings.verify_delay)
+            elif zone_ok and zone in self._unverified:
+                # The zone now matches what is owned, so that is what to expect: an
+                # earlier uncertain write that never landed must not be waited for.
+                self._unverified[zone].update(
+                    {name: set(addresses) for name, addresses in owned.items()}
+                )
             pending = self._unverified.get(zone, {})
             if pending:
                 results = [self._verify(n, zone, addrs) for n, addrs in pending.items()]

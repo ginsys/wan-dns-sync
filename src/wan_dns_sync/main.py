@@ -124,8 +124,8 @@ class Updater:
         self._clock = clock
         self._last_applied: Desired | None = None
         self._last_reconcile = 0.0
-        # zone -> record -> addresses written but not yet seen at every nameserver
-        self._unverified: dict[str, dict[str, set[str]]] = {}
+        # zones written (or possibly written) and not yet seen at every nameserver
+        self._unverified: set[str] = set()
 
     def _desired(self, interface_ips: dict[str, str]) -> Desired:
         """Addresses per owned record. A record with none is left out, so it is never deleted."""
@@ -158,7 +158,6 @@ class Updater:
         for zone, owned in desired.items():
             zone_config = self.config.zones[zone]
             written = False  # a write was made, or may have been (an apply that raised)
-            zone_ok = True
             for provider_name in zone_config.providers if owned else []:
                 try:
                     provider = self._load_provider(
@@ -167,7 +166,7 @@ class Updater:
                     if sync_zone(provider, zone, owned, zone_config.ttl, self.dry_run):
                         any_changes = written = True
                 except Exception as e:
-                    ok = zone_ok = False
+                    ok = False
                     # Only a failed apply may have written; a failure before it wrote nothing.
                     written = written or isinstance(e, WriteUncertainError)
                     logger.error(
@@ -180,23 +179,16 @@ class Updater:
             if self.dry_run:
                 continue
             if written:
-                # Remember what was written until a check passes: the retry finds no
-                # change to apply, and must not read that as a verified zone. A record
-                # that has no address this cycle keeps its pending expectation.
-                pending = self._unverified.setdefault(zone, {})
-                pending.update({name: set(addresses) for name, addresses in owned.items()})
+                # The retry of a write finds no change to apply, and must not read that
+                # as a verified zone: keep the zone marked until a check passes.
+                self._unverified.add(zone)
                 self._sleep(self.config.settings.verify_delay)
-            elif zone_ok and zone in self._unverified:
-                # The zone now matches what is owned, so that is what to expect: an
-                # earlier uncertain write that never landed must not be waited for.
-                self._unverified[zone].update(
-                    {name: set(addresses) for name, addresses in owned.items()}
-                )
-            pending = self._unverified.get(zone, {})
-            if pending:
-                results = [self._verify(n, zone, addrs) for n, addrs in pending.items()]
+            if zone in self._unverified:
+                # Always check what is owned now, never what an earlier cycle wrote: a
+                # record that has lost its addresses is neither published nor checked.
+                results = [self._verify(n, zone, set(a)) for n, a in owned.items()]
                 if all(results):
-                    del self._unverified[zone]
+                    self._unverified.discard(zone)
                 else:
                     ok = False
         if not any_changes:

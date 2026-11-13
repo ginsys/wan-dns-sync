@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import dns.exception
+import dns.message
 import dns.resolver
 import pytest
 
@@ -93,23 +95,42 @@ class TestZoneNameservers:
             }
 
 
-def _no_nameservers(response: object) -> dns.resolver.NoNameservers:
-    """What dnspython raises when its one server failed: errors carry the response, if any."""
+def _no_nameservers(error: object, response: object = None) -> dns.resolver.NoNameservers:
+    """What dnspython raises when its one server failed: the error and the response, if any."""
     return dns.resolver.NoNameservers(
-        request=MagicMock(), errors=[("2001:db8::1", False, 53, "failed", response)]
+        request=MagicMock(), errors=[("2001:db8::1", False, 53, error, response)]
     )
 
 
 class TestAnswers:
-    def test_an_unreachable_server_is_unreachable(self) -> None:
+    @pytest.mark.parametrize(
+        "error",
+        [
+            OSError(101, "Network is unreachable"),
+            ConnectionRefusedError(),
+            dns.exception.Timeout(),
+        ],
+    )
+    def test_a_socket_error_or_timeout_is_unreachable(self, error: Exception) -> None:
         with patch("dns.resolver.Resolver") as resolver:
-            resolver.return_value.resolve.side_effect = _no_nameservers(None)
+            resolver.return_value.resolve.side_effect = _no_nameservers(error)
             with pytest.raises(verify.UnreachableError):
                 verify._answers("2001:db8::1", "a.example.com", 1.0)
 
-    def test_a_server_that_answered_with_a_failure_is_not_unreachable(self) -> None:
+    @pytest.mark.parametrize(
+        ("error", "response"),
+        [
+            ("SERVFAIL", MagicMock()),  # answered with a failure
+            (dns.message.ShortHeader(), None),  # a malformed reply carries no response
+            (dns.message.Truncated(), None),
+            (EOFError(), None),  # the connection closed mid-reply
+        ],
+    )
+    def test_anything_but_a_transport_error_is_not_unreachable(
+        self, error: object, response: object
+    ) -> None:
         with patch("dns.resolver.Resolver") as resolver:
-            resolver.return_value.resolve.side_effect = _no_nameservers(MagicMock())
+            resolver.return_value.resolve.side_effect = _no_nameservers(error, response)
             with pytest.raises(dns.resolver.NoNameservers):
                 verify._answers("2001:db8::1", "a.example.com", 1.0)
 
@@ -118,7 +139,7 @@ class TestVerifyARecords:
     def test_a_servfail_from_one_address_fails_even_when_another_answers(self) -> None:
         def answers(ns: str, fqdn: str, timeout: float) -> set[str]:
             if ":" in ns:
-                raise _no_nameservers(MagicMock())
+                raise _no_nameservers("SERVFAIL", MagicMock())
             return {"10.0.0.1"}
 
         servers = {"ns1.": ["1.1.1.1", "2001:db8::1"]}

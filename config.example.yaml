@@ -1,5 +1,6 @@
 # Example configuration for wan-dns-sync
-# Copy this file to config.yaml and adjust for your environment
+# Copy this file to config.yaml and adjust for your environment.
+# ${VAR} references are replaced from the environment when the file is loaded.
 
 opnsense:
   # OPNsense API base URL
@@ -7,41 +8,59 @@ opnsense:
   # API credentials (set via environment variables)
   key: "${OPNSENSE_API_KEY}"
   secret: "${OPNSENSE_API_SECRET}"
-  # Set to false for self-signed certificates
+  # Verify the router's certificate. For a private CA, keep this true and set ca_file.
   verify_ssl: true
+  # ca_file: /etc/wan-dns-sync/ca.pem
   # Map logical names to OPNsense interface names
-  # Use: curl -u "key:secret" https://opnsense/api/diagnostics/interface/getInterfaceConfig | jq 'keys'
+  # List the names with the interface config endpoint, see the README ("Finding OPNsense interface names")
   interfaces:
-    telenet: "wan"
-    telenet2: "opt1"
+    wan1: "wan"
+    wan2: "opt1"
 
-hetzner:
-  # Hetzner Cloud API token (new hcloud API, not legacy dns.hetzner.com)
-  # Set via environment variable HCLOUD_TOKEN
-  token: "${HCLOUD_TOKEN}"
-  # DNS zone to manage
-  zone: "example.com"
-  # TTL for A records (in seconds)
-  ttl: 300
+# DNS providers are octoDNS provider classes. Every key besides `class` is passed
+# to the provider as it is, so see the provider's own documentation for the options.
+providers:
+  desec:
+    class: octodns_desec.DesecProvider
+    token: "${DESEC_TOKEN}"
+  hetzner:
+    class: octodns_hetzner.HetznerProvider
+    token: "${HCLOUD_TOKEN}"
+    backend: hcloud
+
+# Each zone must already exist at its providers: a missing zone is an error, never created.
+zones:
+  example.com:
+    # Every listed provider is written. Use [hetzner, desec] while moving a zone.
+    providers: [hetzner]
+    # TTL for the A records, in seconds (check the provider's minimum)
+    ttl: 300
+    # Only these records are ever created, changed or deleted. Everything else in the zone is left alone.
+    records:
+      - name: office
+        interfaces: [wan2]       # one address, from wan2
+      - name: home
+        interfaces: [wan1]       # one address, from wan1
+      - name: server
+        interfaces: [wan1, wan2] # two addresses, one per interface
 
 settings:
-  # Interval between update checks (in seconds)
+  # Seconds between OPNsense checks
   interval: 300
-  # Set to true to log changes without making them
+  # Seconds between full reads of the DNS zone while the addresses do not change
+  reconcile_interval: 3600
+  # Log planned changes without making them
   dry_run: false
-  # HTTP health endpoint port (optional, for Kubernetes probes)
-  # Set to null to disable, or a port number like 8080 to enable
+  # HTTP health endpoint port (for Kubernetes probes); null disables it
   health_port: null
-  # Seconds to wait before DNS verification after update
+  # Seconds to wait before checking the zone's nameservers after a change
   verify_delay: 2.0
+  # Publish addresses that are not globally routable (private, CGNAT, ...). Off by default.
+  allow_private_ips: false
 
-records:
-  # Each record defines a hostname and which interfaces provide its IPs
-  - hostname: office
-    interfaces: [telenet2]    # Single IP from telenet2
-
-  - hostname: home
-    interfaces: [telenet]     # Single IP from telenet
-
-  - hostname: server
-    interfaces: [telenet, telenet2]  # Two A records, one per interface
+# Optional: keep the external-dns target annotation of labelled Ingress and HTTPRoute
+# resources equal to the WAN addresses. Needs in-cluster RBAC to list and patch them.
+kubernetes:
+  enabled: false
+  # label_selector: "example.com/apex-dns=true"
+  # interfaces: [wan1, wan2]

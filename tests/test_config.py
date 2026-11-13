@@ -5,7 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
+from tests.conftest import make_config
 from wan_dns_sync.config import (
     Config,
     _process_env_vars,
@@ -75,81 +77,100 @@ class TestLoadConfig:
     """Tests for loading configuration from YAML."""
 
     def test_load_valid_config(self, sample_config_yaml: Path) -> None:
-        """Test loading a valid configuration file."""
         config = load_config(sample_config_yaml)
         assert isinstance(config, Config)
         assert config.opnsense.url == "https://opnsense.local/api"
-        assert config.hetzner.zone == "example.com"
-        assert len(config.records) == 2
+        assert list(config.zones) == ["example.com"]
+        assert [r.name for r in config.zones["example.com"].records] == ["test", "multi"]
 
-    def test_load_config_with_env_vars(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    def test_provider_secret_from_env(
+        self, sample_config_yaml: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Test loading config with environment variable substitution."""
         monkeypatch.setenv("TEST_TOKEN", "my-secret-token")
+        text = sample_config_yaml.read_text().replace(
+            "class: tests.fakes.FakeProvider",
+            'class: tests.fakes.FakeProvider\n    token: "${TEST_TOKEN}"',
+        )
+        sample_config_yaml.write_text(text)
+        assert load_config(sample_config_yaml).providers["fake"]["token"] == "my-secret-token"
 
-        config_content = """
-opnsense:
-  url: "https://opnsense.local/api"
-  key: "key"
-  secret: "secret"
-  interfaces:
-    wan: "wan"
-
-hetzner:
-  token: "${TEST_TOKEN}"
-  zone: "example.com"
-
-records:
-  - hostname: test
-    interfaces: [wan]
-"""
-        config_file = tmp_path / "config.yaml"
-        config_file.write_text(config_content)
-
-        config = load_config(config_file)
-        assert config.hetzner.token == "my-secret-token"
-
-    def test_load_config_defaults(self, tmp_path: Path) -> None:
-        """Test that defaults are applied for optional fields."""
-        config_content = """
-opnsense:
-  url: "https://opnsense.local/api"
-  key: "key"
-  secret: "secret"
-  interfaces:
-    wan: "wan"
-
-hetzner:
-  token: "token"
-  zone: "example.com"
-
-records:
-  - hostname: test
-    interfaces: [wan]
-"""
-        config_file = tmp_path / "config.yaml"
-        config_file.write_text(config_content)
-
-        config = load_config(config_file)
-
-        # Check defaults
+    def test_defaults(self) -> None:
+        config = make_config(settings={})
         assert config.settings.interval == 300
+        assert config.settings.reconcile_interval == 3600
         assert config.settings.dry_run is False
         assert config.settings.health_port is None
-        assert config.settings.verify_delay == 2.0
-        assert config.hetzner.ttl == 300
+        assert config.settings.allow_private_ips is False
         assert config.opnsense.verify_ssl is True
+        assert config.kubernetes.enabled is False
 
-    def test_load_config_file_not_found(self, tmp_path: Path) -> None:
-        """Test that missing config file raises error."""
+    def test_file_not_found(self, tmp_path: Path) -> None:
         with pytest.raises(FileNotFoundError):
             load_config(tmp_path / "nonexistent.yaml")
 
-    def test_load_config_invalid_yaml(self, tmp_path: Path) -> None:
-        """Test that invalid YAML raises error."""
+    def test_invalid_yaml(self, tmp_path: Path) -> None:
         config_file = tmp_path / "config.yaml"
         config_file.write_text("invalid: yaml: content:")
-
-        with pytest.raises((ValueError, Exception)):
+        with pytest.raises(Exception):  # noqa: B017 - any parse or validation failure
             load_config(config_file)
+
+
+class TestValidation:
+    """Structural checks, and that errors never echo secrets."""
+
+    def test_error_does_not_contain_secrets(self) -> None:
+        with pytest.raises(ValidationError) as exc:
+            make_config(
+                opnsense={
+                    "url": "https://opnsense.local/api",
+                    "key": "SUPER-SECRET-KEY",
+                    "secret": "SUPER-SECRET-VALUE",
+                    "interfaces": {"wan1": "wan"},
+                    "typo_field": 1,
+                }
+            )
+        assert "SUPER-SECRET" not in str(exc.value)
+
+    def test_unknown_key_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="settngs"):
+            make_config(settngs={"interval": 5})
+
+    def test_secret_not_in_repr(self, sample_config: Config) -> None:
+        assert "test-secret" not in repr(sample_config)
+        assert sample_config.opnsense.secret.get_secret_value() == "test-secret"
+
+    def test_zone_with_unknown_provider(self) -> None:
+        with pytest.raises(ValidationError, match="unknown provider 'nope'"):
+            make_config(
+                zones={
+                    "example.com": {
+                        "providers": ["nope"],
+                        "records": [{"name": "a", "interfaces": ["wan1"]}],
+                    }
+                }
+            )
+
+    def test_provider_needs_class(self) -> None:
+        with pytest.raises(ValidationError, match="needs a 'class'"):
+            make_config(providers={"fake": {"token": "x"}})
+
+    def test_record_with_unknown_interface(self) -> None:
+        with pytest.raises(ValidationError, match="unknown interfaces"):
+            make_config(
+                zones={
+                    "example.com": {
+                        "providers": ["fake"],
+                        "records": [{"name": "a", "interfaces": ["wan9"]}],
+                    }
+                }
+            )
+
+    def test_kubernetes_enabled_needs_selector_and_interfaces(self) -> None:
+        with pytest.raises(ValidationError, match="label_selector"):
+            make_config(kubernetes={"enabled": True})
+
+    def test_kubernetes_unknown_interface(self) -> None:
+        with pytest.raises(ValidationError, match="kubernetes.interfaces"):
+            make_config(kubernetes={"enabled": True, "label_selector": "a=b", "interfaces": ["x"]})
+
+

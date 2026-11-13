@@ -1,4 +1,4 @@
-"""Tests for DNS verification."""
+"""Tests for DNS verification against a zone's own nameservers."""
 
 from __future__ import annotations
 
@@ -6,189 +6,89 @@ from unittest.mock import MagicMock, patch
 
 import dns.resolver
 
-from wan_dns_sync.verify import (
-    resolve_nameserver_ips,
-    verify_a_records,
-)
+from wan_dns_sync import verify
+from wan_dns_sync.verify import verify_a_records, zone_nameserver_ips
 
 
-class TestResolveNameserverIps:
-    """Tests for resolve_nameserver_ips."""
+def _answer(*items: object) -> MagicMock:
+    answer = MagicMock()
+    answer.__iter__ = lambda self: iter(items)
+    return answer
 
-    def test_resolve_success(self) -> None:
-        """Test successful nameserver resolution."""
-        mock_answer = MagicMock()
-        mock_rdata1 = MagicMock()
-        mock_rdata1.address = "1.2.3.4"
-        mock_rdata2 = MagicMock()
-        mock_rdata2.address = "5.6.7.8"
-        mock_answer.__iter__ = lambda self: iter([mock_rdata1, mock_rdata2])
 
-        with patch("dns.resolver.Resolver") as mock_resolver:
-            mock_resolver.return_value.resolve.return_value = mock_answer
+def _rdata(address: str) -> MagicMock:
+    rdata = MagicMock()
+    rdata.address = address
+    return rdata
 
-            ips = resolve_nameserver_ips()
 
-        # Should have IPs for each nameserver
-        assert len(ips) > 0
+def _ns(target: str) -> MagicMock:
+    rdata = MagicMock()
+    rdata.target = target
+    return rdata
 
-    def test_resolve_partial_failure(self) -> None:
-        """Test resolution when some nameservers fail."""
-        call_count = 0
 
-        def mock_resolve(name: str, rdtype: str) -> MagicMock:
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
+class TestZoneNameserverIps:
+    def test_resolves_every_ns_of_the_zone(self) -> None:
+        def resolve(name: str, rdtype: str) -> MagicMock:
+            if rdtype == "NS":
+                return _answer(_ns("ns1.example.net."), _ns("ns2.example.net."))
+            addresses = {"ns1.example.net.": "1.1.1.1", "ns2.example.net.": "2.2.2.2"}
+            return _answer(_rdata(addresses[name]))
+
+        with patch("dns.resolver.Resolver") as resolver:
+            resolver.return_value.resolve = resolve
+            assert zone_nameserver_ips("example.com") == ["1.1.1.1", "2.2.2.2"]
+
+    def test_ns_lookup_failure_returns_nothing(self) -> None:
+        with patch("dns.resolver.Resolver") as resolver:
+            resolver.return_value.resolve.side_effect = dns.resolver.NXDOMAIN()
+            assert zone_nameserver_ips("example.com") == []
+
+    def test_one_unresolvable_nameserver_is_skipped(self) -> None:
+        def resolve(name: str, rdtype: str) -> MagicMock:
+            if rdtype == "NS":
+                return _answer(_ns("bad.example.net."), _ns("ns2.example.net."))
+            if name == "bad.example.net.":
                 raise dns.resolver.NXDOMAIN()
-            mock_answer = MagicMock()
-            mock_rdata = MagicMock()
-            mock_rdata.address = "1.2.3.4"
-            mock_answer.__iter__ = lambda self: iter([mock_rdata])
-            return mock_answer
+            return _answer(_rdata("2.2.2.2"))
 
-        with patch("dns.resolver.Resolver") as mock_resolver:
-            mock_resolver.return_value.resolve = mock_resolve
-
-            ips = resolve_nameserver_ips()
-
-        # Should still get IPs from successful resolutions
-        assert len(ips) > 0
-
-    def test_resolve_all_fail(self) -> None:
-        """Test resolution when all nameservers fail."""
-        with patch("dns.resolver.Resolver") as mock_resolver:
-            mock_resolver.return_value.resolve.side_effect = dns.resolver.NXDOMAIN()
-
-            ips = resolve_nameserver_ips()
-
-        assert ips == []
+        with patch("dns.resolver.Resolver") as resolver:
+            resolver.return_value.resolve = resolve
+            assert zone_nameserver_ips("example.com") == ["2.2.2.2"]
 
 
 class TestVerifyARecords:
-    """Tests for verify_a_records."""
+    def test_all_nameservers_match(self) -> None:
+        with (
+            patch.object(verify, "zone_nameserver_ips", return_value=["1.1.1.1", "2.2.2.2"]),
+            patch.object(verify, "_answers", return_value={"10.0.0.1"}),
+        ):
+            assert verify_a_records("test", "example.com", {"10.0.0.1"}) is True
 
-    def test_verify_match(self) -> None:
-        """Test verification when DNS matches expected."""
-        mock_ns_answer = MagicMock()
-        mock_ns_rdata = MagicMock()
-        mock_ns_rdata.address = "1.2.3.4"
-        mock_ns_answer.__iter__ = lambda self: iter([mock_ns_rdata])
+    def test_one_nameserver_disagrees(self) -> None:
+        answers = {"1.1.1.1": {"10.0.0.1"}, "2.2.2.2": {"10.0.0.9"}}
+        with (
+            patch.object(verify, "zone_nameserver_ips", return_value=["1.1.1.1", "2.2.2.2"]),
+            patch.object(verify, "_answers", side_effect=lambda ns, f, t: answers[ns]),
+        ):
+            assert verify_a_records("test", "example.com", {"10.0.0.1"}) is False
 
-        mock_a_answer = MagicMock()
-        mock_a_rdata = MagicMock()
-        mock_a_rdata.address = "10.0.0.1"
-        mock_a_answer.__iter__ = lambda self: iter([mock_a_rdata])
+    def test_nameserver_error_fails(self) -> None:
+        with (
+            patch.object(verify, "zone_nameserver_ips", return_value=["1.1.1.1"]),
+            patch.object(verify, "_answers", side_effect=TimeoutError("slow")),
+        ):
+            assert verify_a_records("test", "example.com", {"10.0.0.1"}) is False
 
-        def mock_resolve(name: str, rdtype: str) -> MagicMock:
-            if rdtype == "A" and "ns.hetzner" in name:
-                return mock_ns_answer
-            return mock_a_answer
+    def test_no_nameservers_fails(self) -> None:
+        with patch.object(verify, "zone_nameserver_ips", return_value=[]):
+            assert verify_a_records("test", "example.com", {"10.0.0.1"}) is False
 
-        with patch("dns.resolver.Resolver") as mock_resolver:
-            mock_resolver.return_value.resolve = mock_resolve
-
-            result = verify_a_records("test", "example.com", {"10.0.0.1"})
-
-        assert result is True
-
-    def test_verify_mismatch(self) -> None:
-        """Test verification when DNS doesn't match expected."""
-        mock_ns_answer = MagicMock()
-        mock_ns_rdata = MagicMock()
-        mock_ns_rdata.address = "1.2.3.4"
-        mock_ns_answer.__iter__ = lambda self: iter([mock_ns_rdata])
-
-        mock_a_answer = MagicMock()
-        mock_a_rdata = MagicMock()
-        mock_a_rdata.address = "10.0.0.1"
-        mock_a_answer.__iter__ = lambda self: iter([mock_a_rdata])
-
-        def mock_resolve(name: str, rdtype: str) -> MagicMock:
-            if rdtype == "A" and "ns.hetzner" in name:
-                return mock_ns_answer
-            return mock_a_answer
-
-        with patch("dns.resolver.Resolver") as mock_resolver:
-            mock_resolver.return_value.resolve = mock_resolve
-
-            result = verify_a_records("test", "example.com", {"10.0.0.2"})
-
-        assert result is False
-
-    def test_verify_nxdomain_expected(self) -> None:
-        """Test verification when NXDOMAIN is expected (empty IPs)."""
-        mock_ns_answer = MagicMock()
-        mock_ns_rdata = MagicMock()
-        mock_ns_rdata.address = "1.2.3.4"
-        mock_ns_answer.__iter__ = lambda self: iter([mock_ns_rdata])
-
-        call_count = 0
-
-        def mock_resolve(name: str, rdtype: str) -> MagicMock:
-            nonlocal call_count
-            call_count += 1
-            if "ns.hetzner" in name:
-                return mock_ns_answer
-            raise dns.resolver.NXDOMAIN()
-
-        with patch("dns.resolver.Resolver") as mock_resolver:
-            mock_resolver.return_value.resolve = mock_resolve
-
-            result = verify_a_records("test", "example.com", set())
-
-        assert result is True
-
-    def test_verify_nxdomain_unexpected(self) -> None:
-        """Test verification when NXDOMAIN is unexpected."""
-        mock_ns_answer = MagicMock()
-        mock_ns_rdata = MagicMock()
-        mock_ns_rdata.address = "1.2.3.4"
-        mock_ns_answer.__iter__ = lambda self: iter([mock_ns_rdata])
-
-        def mock_resolve(name: str, rdtype: str) -> MagicMock:
-            if "ns.hetzner" in name:
-                return mock_ns_answer
-            raise dns.resolver.NXDOMAIN()
-
-        with patch("dns.resolver.Resolver") as mock_resolver:
-            mock_resolver.return_value.resolve = mock_resolve
-
-            result = verify_a_records("test", "example.com", {"10.0.0.1"})
-
-        assert result is False
-
-    def test_verify_no_nameservers(self) -> None:
-        """Test verification when nameserver resolution fails."""
-        with patch("dns.resolver.Resolver") as mock_resolver:
-            mock_resolver.return_value.resolve.side_effect = Exception("DNS error")
-
-            result = verify_a_records("test", "example.com", {"10.0.0.1"})
-
-        assert result is False
-
-    def test_verify_multiple_ips(self) -> None:
-        """Test verification with multiple IPs."""
-        mock_ns_answer = MagicMock()
-        mock_ns_rdata = MagicMock()
-        mock_ns_rdata.address = "1.2.3.4"
-        mock_ns_answer.__iter__ = lambda self: iter([mock_ns_rdata])
-
-        mock_a_answer = MagicMock()
-        mock_a_rdata1 = MagicMock()
-        mock_a_rdata1.address = "10.0.0.1"
-        mock_a_rdata2 = MagicMock()
-        mock_a_rdata2.address = "10.0.0.2"
-        mock_a_answer.__iter__ = lambda self: iter([mock_a_rdata1, mock_a_rdata2])
-
-        def mock_resolve(name: str, rdtype: str) -> MagicMock:
-            if "ns.hetzner" in name:
-                return mock_ns_answer
-            return mock_a_answer
-
-        with patch("dns.resolver.Resolver") as mock_resolver:
-            mock_resolver.return_value.resolve = mock_resolve
-
-            result = verify_a_records("test", "example.com", {"10.0.0.1", "10.0.0.2"})
-
-        assert result is True
+    def test_queries_the_full_name(self) -> None:
+        with (
+            patch.object(verify, "zone_nameserver_ips", return_value=["1.1.1.1"]),
+            patch.object(verify, "_answers", return_value={"10.0.0.1"}) as answers,
+        ):
+            verify_a_records("test", "example.com", {"10.0.0.1"})
+        assert answers.call_args.args[1] == "test.example.com"

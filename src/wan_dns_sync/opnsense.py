@@ -1,5 +1,7 @@
 """OPNsense API client for retrieving WAN interface IP addresses."""
 
+import ipaddress
+
 import httpx
 import structlog
 
@@ -8,18 +10,29 @@ from .config import OPNsenseConfig
 logger = structlog.get_logger()
 
 
+def _publishable(address: str, allow_private: bool) -> bool:
+    """True for a plain IPv4 address that may be published."""
+    try:
+        parsed = ipaddress.IPv4Address(address)
+    except ValueError:
+        return False
+    return allow_private or parsed.is_global
+
+
 class OPNsenseClient:
     """Client for OPNsense REST API."""
 
-    def __init__(self, config: OPNsenseConfig) -> None:
+    def __init__(self, config: OPNsenseConfig, allow_private_ips: bool = False) -> None:
         self.config = config
+        self.allow_private_ips = allow_private_ips
         base_url = config.url.rstrip("/")
         if not base_url.endswith("/api"):
             base_url = f"{base_url}/api"
         self.base_url = base_url
+        verify: bool | str = str(config.ca_file) if config.ca_file else config.verify_ssl
         self._client = httpx.Client(
-            auth=(config.key, config.secret),
-            verify=config.verify_ssl,
+            auth=(config.key.get_secret_value(), config.secret.get_secret_value()),
+            verify=verify,
             timeout=30.0,
         )
 
@@ -78,7 +91,14 @@ class OPNsenseClient:
             if ipv4_addr is None and "ipaddr" in iface_info:
                 ipv4_addr = iface_info["ipaddr"]
 
-            if ipv4_addr:
+            if ipv4_addr and not _publishable(str(ipv4_addr), self.allow_private_ips):
+                logger.warning(
+                    "Ignoring address that is not a public IPv4 address",
+                    logical_name=logical_name,
+                    opnsense_name=opnsense_name,
+                    address=ipv4_addr,
+                )
+            elif ipv4_addr:
                 result[logical_name] = ipv4_addr
                 logger.debug(
                     "Found interface IP",
@@ -94,14 +114,3 @@ class OPNsenseClient:
                 )
 
         return result
-
-    def health_check(self, timeout: float = 2.0) -> bool:
-        """Check if OPNsense API is accessible."""
-        try:
-            url = f"{self.base_url}/diagnostics/interface/getInterfaceConfig"
-            response = self._client.get(url, timeout=timeout)
-            response.raise_for_status()
-            return True
-        except Exception as e:
-            logger.error("OPNsense health check failed", error=str(e))
-            return False

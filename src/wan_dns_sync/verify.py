@@ -1,4 +1,4 @@
-"""DNS verification by querying Hetzner authoritative nameservers."""
+"""DNS verification by querying the zone's own authoritative nameservers."""
 
 from __future__ import annotations
 
@@ -7,35 +7,35 @@ import structlog
 
 logger = structlog.get_logger()
 
-# Hetzner's authoritative nameservers
-HETZNER_NAMESERVERS = [
-    "helium.ns.hetzner.de",
-    "hydrogen.ns.hetzner.com",
-    "oxygen.ns.hetzner.com",
-]
 
-
-def resolve_nameserver_ips(timeout: float = 5.0) -> list[str]:
-    """Resolve Hetzner NS hostnames to IP addresses.
-
-    Args:
-        timeout: DNS query timeout in seconds
-
-    Returns:
-        List of nameserver IP addresses
-    """
+def zone_nameserver_ips(zone: str, timeout: float = 5.0) -> list[str]:
+    """Addresses of the zone's authoritative nameservers (empty when none resolve)."""
     resolver = dns.resolver.Resolver()
     resolver.lifetime = timeout
 
-    ns_ips: list[str] = []
-    for ns in HETZNER_NAMESERVERS:
+    ips: list[str] = []
+    try:
+        names = [str(r.target) for r in resolver.resolve(zone, "NS")]
+    except Exception as e:
+        logger.warning("Could not look up zone nameservers", zone=zone, error=str(e))
+        return ips
+    for ns in names:
         try:
-            answers = resolver.resolve(ns, "A")
-            ns_ips.extend([rdata.address for rdata in answers])
+            ips.extend(rdata.address for rdata in resolver.resolve(ns, "A"))
         except Exception:
             continue
+    return ips
 
-    return ns_ips
+
+def _answers(ns_ip: str, fqdn: str, timeout: float) -> set[str]:
+    """The A records one nameserver returns for ``fqdn`` (empty on NXDOMAIN or no answer)."""
+    resolver = dns.resolver.Resolver(configure=False)
+    resolver.nameservers = [ns_ip]
+    resolver.lifetime = timeout
+    try:
+        return {rdata.address for rdata in resolver.resolve(fqdn, "A")}
+    except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
+        return set()
 
 
 def verify_a_records(
@@ -44,92 +44,31 @@ def verify_a_records(
     expected_ips: set[str],
     timeout: float = 5.0,
 ) -> bool:
-    """Verify A records match expected IPs by querying Hetzner NS directly.
-
-    Queries the authoritative Hetzner nameservers to verify DNS changes
-    have propagated correctly.
-
-    Args:
-        hostname: Record name (without zone suffix)
-        zone: DNS zone name
-        expected_ips: Set of expected IP addresses
-        timeout: DNS query timeout in seconds
-
-    Returns:
-        True if DNS matches expected, False otherwise
-    """
+    """True when every authoritative nameserver of ``zone`` returns ``expected_ips``."""
     fqdn = f"{hostname}.{zone}".rstrip(".")
 
-    ns_ips = resolve_nameserver_ips(timeout)
+    ns_ips = zone_nameserver_ips(zone, timeout)
     if not ns_ips:
-        logger.warning("Could not resolve any Hetzner nameservers")
+        logger.warning("No authoritative nameserver to verify against", zone=zone)
         return False
 
-    resolver = dns.resolver.Resolver()
-    resolver.nameservers = ns_ips
-    resolver.lifetime = timeout
-
-    try:
-        answers = resolver.resolve(fqdn, "A")
-        resolved_ips = {rdata.address for rdata in answers}
-
-        if resolved_ips == expected_ips:
-            logger.debug(
-                "DNS verification passed",
-                hostname=hostname,
-                zone=zone,
-                ips=sorted(resolved_ips),
+    ok = True
+    for ns_ip in ns_ips:
+        try:
+            actual = _answers(ns_ip, fqdn, timeout)
+        except Exception as e:
+            logger.warning("DNS verification error", nameserver=ns_ip, fqdn=fqdn, error=str(e))
+            ok = False
+            continue
+        if actual != expected_ips:
+            logger.warning(
+                "DNS verification mismatch",
+                nameserver=ns_ip,
+                fqdn=fqdn,
+                expected=sorted(expected_ips),
+                actual=sorted(actual),
             )
-            return True
-
-        logger.warning(
-            "DNS verification mismatch",
-            hostname=hostname,
-            zone=zone,
-            expected=sorted(expected_ips),
-            actual=sorted(resolved_ips),
-        )
-        return False
-
-    except dns.resolver.NXDOMAIN:
-        # Record doesn't exist - correct if we expect no IPs
-        if not expected_ips:
-            logger.debug(
-                "DNS verification passed (NXDOMAIN expected)",
-                hostname=hostname,
-                zone=zone,
-            )
-            return True
-        logger.warning(
-            "DNS verification failed: NXDOMAIN",
-            hostname=hostname,
-            zone=zone,
-            expected=sorted(expected_ips),
-        )
-        return False
-
-    except dns.resolver.NoAnswer:
-        # No A records for hostname
-        if not expected_ips:
-            logger.debug(
-                "DNS verification passed (no A records expected)",
-                hostname=hostname,
-                zone=zone,
-            )
-            return True
-        logger.warning(
-            "DNS verification failed: no A records",
-            hostname=hostname,
-            zone=zone,
-            expected=sorted(expected_ips),
-        )
-        return False
-
-    except Exception as e:
-        logger.error(
-            "DNS verification error",
-            hostname=hostname,
-            zone=zone,
-            error=str(e),
-        )
-        return False
+            ok = False
+    if ok:
+        logger.debug("DNS verification passed", fqdn=fqdn, nameservers=len(ns_ips))
+    return ok

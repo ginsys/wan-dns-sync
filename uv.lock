@@ -249,6 +249,15 @@ wheels = [
 ]
 
 [[package]]
+name = "fqdn"
+version = "1.6.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/02/01/248d44fbda9e78fa1a7b5a475194bef4c4a3e285db286419f3bb42f2efdf/fqdn-1.6.0.tar.gz", hash = "sha256:e39bf62e2a9481aa2cb780554fdfd944dd8ee5f230eb831684d539cbafed8de2", size = 130737, upload-time = "2026-09-28T05:43:35.482Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/15/d5/a8f9149b97cced9e1f4bff92ff0b6206120e2c853ae774d7020d6ecd8fa8/fqdn-1.6.0-py3-none-any.whl", hash = "sha256:6c793c312ccfa29981e1135b3ef5e1277ebe639731a6b0f7350d90e96e63f0b4", size = 12569, upload-time = "2026-09-28T05:43:33.951Z" },
+]
+
+[[package]]
 name = "frozenlist"
 version = "1.8.0"
 source = { registry = "https://pypi.org/simple" }
@@ -659,12 +668,64 @@ wheels = [
 ]
 
 [[package]]
+name = "natsort"
+version = "8.4.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e2/a9/a0c57aee75f77794adaf35322f8b6404cbd0f89ad45c87197a937764b7d0/natsort-8.4.0.tar.gz", hash = "sha256:45312c4a0e5507593da193dedd04abb1469253b601ecaf63445ad80f0a1ea581", size = 76575, upload-time = "2023-06-20T04:17:19.925Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ef/82/7a9d0550484a62c6da82858ee9419f3dd1ccc9aa1c26a1e43da3ecd20b0d/natsort-8.4.0-py3-none-any.whl", hash = "sha256:4732914fb471f56b5cce04d7bae6f164a592c7712e1c85f9ef585e197299521c", size = 38268, upload-time = "2023-06-20T04:17:17.522Z" },
+]
+
+[[package]]
 name = "oauthlib"
 version = "4.0.0"
 source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/7a/d8/a1bcc8ba112a627f8ffbdc212a78ce18d3ac07e91a5ca65d27918eee25a1/oauthlib-4.0.0.tar.gz", hash = "sha256:efb274799819440f95b4ab3b818869f1ce9ae26c5beacba0201d1a1b76b54f86", size = 187232, upload-time = "2026-09-28T06:01:18.77Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d9/f4/78229a1066068ca14fc60fb26cf7381cabe4382261392b90e5f9552722d4/oauthlib-4.0.0-py3-none-any.whl", hash = "sha256:624c28c13a0a59cabf9747dfa52af63be3e512a7f2714df16e91b5b3a145e6cd", size = 159715, upload-time = "2026-09-28T06:01:17.008Z" },
+]
+
+[[package]]
+name = "octodns"
+version = "1.22.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "dnspython" },
+    { name = "fqdn" },
+    { name = "idna" },
+    { name = "natsort" },
+    { name = "python-dateutil" },
+    { name = "pyyaml" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/d7/dc/7459cfb9f3bf85aa541b1b3283f0d9749e82be3d70b03129409b72b4f0e2/octodns-1.22.0.tar.gz", hash = "sha256:b880ece209a19f33edc05ec13db55abee844e4a851978a19c48b4e3ef317bbf0", size = 1046974, upload-time = "2026-08-15T20:51:08.161Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fa/99/b9f024a5fdd12088d975b6828f143b429b41938019f119db371102ae015d/octodns-1.22.0-py3-none-any.whl", hash = "sha256:dfb7b529ec4e9eb2c08a03af15e8e48d7a67ffda7b930beccf7203e64018cad8", size = 165520, upload-time = "2026-08-15T20:51:06.622Z" },
+]
+
+[[package]]
+name = "octodns-desec"
+version = "1.3.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "octodns" },
+    { name = "requests" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/2b/9d/84e94a9b3ad37756187ee8d00bbe86f0d280b8895c28ab41e61b5766d8f4/octodns_desec-1.3.0.tar.gz", hash = "sha256:4cacb63865c410cfd43fd5dab429a68aab8015c8f82bac9a1a542b6e25fee5a9", size = 7774, upload-time = "2026-01-18T11:41:31.479Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e4/93/2484bcb1615731d53a6517035214bd993400949825954be26d3cb6485f29/octodns_desec-1.3.0-py3-none-any.whl", hash = "sha256:cbd1c70d92d0088cbae680d26d99be3211dbc9cafd9b1ba4956803828ff21777", size = 7155, upload-time = "2026-01-18T11:41:29.811Z" },
+]
+
+[[package]]
+name = "octodns-hetzner"
+version = "3.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "hcloud" },
+    { name = "octodns" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ef/9b/81c65c288a7134a4c4a51d1cdd64f1ffded23ce8e0fea1d568729900ae6a/octodns_hetzner-3.0.0.tar.gz", hash = "sha256:cc982479d3a6555aa39384e43e6095c25a582e2cb71db6ecf0be11770a02d550", size = 26884, upload-time = "2026-10-28T23:09:40.638Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/89/78/15a8f9d8f451551090a67e4d3356cb6c6247bed102f44364df65550f7120/octodns_hetzner-3.0.0-py3-none-any.whl", hash = "sha256:1928ccada0e2ba0b575400e3872660bc075a9aaeff4d45800f2382e4a857fb9e", size = 13724, upload-time = "2026-10-28T23:09:39.591Z" },
 ]
 
 [[package]]
@@ -892,20 +953,6 @@ wheels = [
 ]
 
 [[package]]
-name = "pydantic-settings"
-version = "2.12.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "pydantic" },
-    { name = "python-dotenv" },
-    { name = "typing-inspection" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/43/4b/ac7e0aae12027748076d72a8764ff1c9d82ca75a7a52622e67ed3f765c54/pydantic_settings-2.12.0.tar.gz", hash = "sha256:005538ef951e3c2a68e1c08b292b5f2e71490def8589d4221b95dab00dafcfd0", size = 194184, upload-time = "2025-11-10T14:25:47.013Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/c1/60/5d4751ba3f4a40a6891f24eec885f51afd78d208498268c734e256fb13c4/pydantic_settings-2.12.0-py3-none-any.whl", hash = "sha256:fddb9fd99a5b18da837b29710391e945b1e30c135477f484084ee513adb93809", size = 51880, upload-time = "2025-11-10T14:25:45.546Z" },
-]
-
-[[package]]
 name = "pygments"
 version = "2.19.2"
 source = { registry = "https://pypi.org/simple" }
@@ -931,19 +978,6 @@ wheels = [
 ]
 
 [[package]]
-name = "pytest-asyncio"
-version = "1.3.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "pytest" },
-    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/90/2c/8af215c0f776415f3590cac4f9086ccefd6fd463befeae41cd4d3f193e5a/pytest_asyncio-1.3.0.tar.gz", hash = "sha256:d7f52f36d231b80ee124cd216ffb19369aa168fc10095013c6b014a34d3ee9e5", size = 50087, upload-time = "2025-11-10T16:07:47.256Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/e5/35/f8b19922b6a25bc0880171a2f1a003eaeb93657475193ab516fd87cac9da/pytest_asyncio-1.3.0-py3-none-any.whl", hash = "sha256:611e26147c7f77640e6d0a92a38ed17c3e9848063698d5c93d5aa7aa11cebff5", size = 15075, upload-time = "2025-11-10T16:07:45.537Z" },
-]
-
-[[package]]
 name = "python-dateutil"
 version = "2.9.0.post0"
 source = { registry = "https://pypi.org/simple" }
@@ -953,15 +987,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/66/c0/0c8b6ad9f17a802ee498c46e004a0eb49bc148f2fd230864601a86dcf6db/python-dateutil-2.9.0.post0.tar.gz", hash = "sha256:37dd54208da7e1cd875388217d5e00ebd4179249f90fb72437e91a35459a0ad3", size = 342432, upload-time = "2024-03-01T18:36:20.211Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ec/57/56b9bcc3c9c6a792fcbaf139543cee77261f3651ca9da0c93f5c1221264b/python_dateutil-2.9.0.post0-py2.py3-none-any.whl", hash = "sha256:a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427", size = 229892, upload-time = "2024-03-01T18:36:18.57Z" },
-]
-
-[[package]]
-name = "python-dotenv"
-version = "1.2.1"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/f0/26/19cadc79a718c5edbec86fd4919a6b6d3f681039a2f6d66d14be94e75fb9/python_dotenv-1.2.1.tar.gz", hash = "sha256:42667e897e16ab0d66954af0e60a9caa94f0fd4ecf3aaf6d2d260eec1aa36ad6", size = 44221, upload-time = "2025-10-26T15:12:10.434Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/14/1b/a298b06749107c305e1fe0f814c6c74aea7b2f1e10989cb30f544a1b3253/python_dotenv-1.2.1-py3-none-any.whl", hash = "sha256:b81ee9561e9ca4004139c6cbba3a238c32b03e4894671e181b671e8cb8425d61", size = 21230, upload-time = "2025-10-26T15:12:09.109Z" },
 ]
 
 [[package]]
@@ -1139,11 +1164,12 @@ version = "0.4.0"
 source = { editable = "." }
 dependencies = [
     { name = "dnspython" },
-    { name = "hcloud" },
     { name = "httpx" },
     { name = "kubernetes" },
+    { name = "octodns" },
+    { name = "octodns-desec" },
+    { name = "octodns-hetzner" },
     { name = "pydantic" },
-    { name = "pydantic-settings" },
     { name = "pyyaml" },
     { name = "structlog" },
 ]
@@ -1152,7 +1178,6 @@ dependencies = [
 dev = [
     { name = "mypy" },
     { name = "pytest" },
-    { name = "pytest-asyncio" },
     { name = "respx" },
     { name = "ruff" },
     { name = "types-pyyaml" },
@@ -1161,14 +1186,14 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "dnspython", specifier = ">=2.6" },
-    { name = "hcloud", specifier = ">=2.13" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "kubernetes", specifier = ">=30.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10" },
+    { name = "octodns", specifier = ">=1.22.0" },
+    { name = "octodns-desec", specifier = ">=1.3.0" },
+    { name = "octodns-hetzner", specifier = ">=3.0.0" },
     { name = "pydantic", specifier = ">=2.0" },
-    { name = "pydantic-settings", specifier = ">=2.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "respx", marker = "extra == 'dev'", specifier = ">=0.22" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.5" },

@@ -95,8 +95,9 @@ def update_apex_dns_annotations(
 
 
 def _api_error(error: ApiException) -> str:
-    """Status and reason only: str(ApiException) carries the response headers and body."""
-    return f"HTTP {error.status} {error.reason}"
+    """The status code only: str(ApiException) carries the response headers and body, and
+    the client builds ``reason`` from the body for a response it cannot decode."""
+    return f"HTTP {error.status}"
 
 
 def _describe(error: Exception, kind: str) -> str:

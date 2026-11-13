@@ -241,13 +241,27 @@ class TestUpdateApexDnsAnnotations:
 
         assert_patched(custom_api.patch_namespaced_custom_object)
 
-    def test_an_api_error_never_carries_the_response_body_or_headers(self) -> None:
+    @pytest.mark.parametrize(
+        "failing",
+        [
+            "list_ingress_for_all_namespaces",
+            "patch_namespaced_ingress",
+            "list_cluster_custom_object",
+            "patch_namespaced_custom_object",
+        ],
+    )
+    def test_an_api_error_never_carries_the_response_body_headers_or_reason(
+        self, failing: str
+    ) -> None:
+        """The client builds `reason` from the body for a response it cannot decode."""
         networking_api = make_networking_api(None)
-        error = ApiException(status=403, reason="Forbidden")
+        custom_api = make_custom_api(None)
+        error = ApiException(status=403, reason="Failed to parse SECRET-REASON as datetime")
         error.body = "SECRET-BODY"
         error.headers = {"Authorization": "SECRET-HEADER"}
-        networking_api.list_ingress_for_all_namespaces.side_effect = error
-        custom_api = make_custom_api(None)
+        for api in (networking_api, custom_api):
+            if hasattr(api, failing):
+                getattr(api, failing).side_effect = error
 
         with (
             patch("wan_dns_sync.kubernetes_updater.config.load_incluster_config"),
@@ -259,12 +273,14 @@ class TestUpdateApexDnsAnnotations:
                 "wan_dns_sync.kubernetes_updater.client.CustomObjectsApi",
                 return_value=custom_api,
             ),
+            capture_logs() as logs,
             pytest.raises(KubernetesUpdateError) as raised,
         ):
             update_apex_dns_annotations(["5.6.7.8", "1.2.3.4"], SELECTOR)
 
-        assert "HTTP 403 Forbidden" in str(raised.value)
-        assert "SECRET" not in str(raised.value)
+        everything = f"{raised.value} {logs}"
+        assert "SECRET" not in everything
+        assert "403" in everything
 
     def test_a_transport_error_on_ingresses_does_not_stop_the_httproutes(self) -> None:
         """urllib3 errors are not ApiExceptions and the client does not wrap them."""

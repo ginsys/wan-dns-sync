@@ -127,7 +127,7 @@ docker run --rm \
   -e OPNSENSE_API_KEY='your-key' \
   -e OPNSENSE_API_SECRET='your-secret' \
   -e HCLOUD_TOKEN='your-token' \
-  ghcr.io/ginsys/wan-dns-sync:latest --once
+  ghcr.io/ginsys/wan-dns-sync:main --once
 ```
 
 **Run with explicit config path:**
@@ -138,7 +138,7 @@ docker run --rm \
   -e OPNSENSE_API_KEY='your-key' \
   -e OPNSENSE_API_SECRET='your-secret' \
   -e HCLOUD_TOKEN='your-token' \
-  ghcr.io/ginsys/wan-dns-sync:latest -c /app/config.yaml --once
+  ghcr.io/ginsys/wan-dns-sync:main -c /app/config.yaml --once
 ```
 
 ### Finding OPNsense Interface Names

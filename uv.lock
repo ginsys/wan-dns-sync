@@ -668,50 +668,6 @@ wheels = [
 ]
 
 [[package]]
-name = "opnsense-dyndns-hetzner"
-version = "0.4.0"
-source = { editable = "." }
-dependencies = [
-    { name = "dnspython" },
-    { name = "hcloud" },
-    { name = "httpx" },
-    { name = "kubernetes" },
-    { name = "pydantic" },
-    { name = "pydantic-settings" },
-    { name = "pyyaml" },
-    { name = "structlog" },
-]
-
-[package.optional-dependencies]
-dev = [
-    { name = "mypy" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "respx" },
-    { name = "ruff" },
-    { name = "types-pyyaml" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "dnspython", specifier = ">=2.6" },
-    { name = "hcloud", specifier = ">=2.13" },
-    { name = "httpx", specifier = ">=0.27" },
-    { name = "kubernetes", specifier = ">=30.0" },
-    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10" },
-    { name = "pydantic", specifier = ">=2.0" },
-    { name = "pydantic-settings", specifier = ">=2.0" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
-    { name = "pyyaml", specifier = ">=6.0" },
-    { name = "respx", marker = "extra == 'dev'", specifier = ">=0.22" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.5" },
-    { name = "structlog", specifier = ">=24.0" },
-    { name = "types-pyyaml", marker = "extra == 'dev'" },
-]
-provides-extras = ["dev"]
-
-[[package]]
 name = "packaging"
 version = "25.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1176,6 +1132,50 @@ sdist = { url = "https://files.pythonhosted.org/packages/1e/24/a2a2ed9addd907787
 wheels = [
     { url = "https://files.pythonhosted.org/packages/6d/b9/4095b668ea3678bf6a0af005527f39de12fb026516fb3df17495a733b7f8/urllib3-2.6.2-py3-none-any.whl", hash = "sha256:ec21cddfe7724fc7cb4ba4bea7aa8e2ef36f607a4bab81aa6ce42a13dc3f03dd", size = 131182, upload-time = "2025-12-11T15:56:38.584Z" },
 ]
+
+[[package]]
+name = "wan-dns-sync"
+version = "0.4.0"
+source = { editable = "." }
+dependencies = [
+    { name = "dnspython" },
+    { name = "hcloud" },
+    { name = "httpx" },
+    { name = "kubernetes" },
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+    { name = "pyyaml" },
+    { name = "structlog" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "mypy" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "respx" },
+    { name = "ruff" },
+    { name = "types-pyyaml" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "dnspython", specifier = ">=2.6" },
+    { name = "hcloud", specifier = ">=2.13" },
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "kubernetes", specifier = ">=30.0" },
+    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10" },
+    { name = "pydantic", specifier = ">=2.0" },
+    { name = "pydantic-settings", specifier = ">=2.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
+    { name = "pyyaml", specifier = ">=6.0" },
+    { name = "respx", marker = "extra == 'dev'", specifier = ">=0.22" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.5" },
+    { name = "structlog", specifier = ">=24.0" },
+    { name = "types-pyyaml", marker = "extra == 'dev'" },
+]
+provides-extras = ["dev"]
 
 [[package]]
 name = "websocket-client"

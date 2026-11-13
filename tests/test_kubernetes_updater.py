@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 from kubernetes.client import ApiClient
 from structlog.testing import capture_logs
 
-from opnsense_dyndns_hetzner.kubernetes_updater import (
+from wan_dns_sync.kubernetes_updater import (
     STALE_ANNOTATION_KEYS,
     TARGET_ANNOTATION_KEY,
     _update_httproutes,
@@ -201,13 +201,13 @@ class TestUpdateApexDnsAnnotations:
         custom_api = make_custom_api(None)
 
         with (
-            patch("opnsense_dyndns_hetzner.kubernetes_updater.config.load_incluster_config"),
+            patch("wan_dns_sync.kubernetes_updater.config.load_incluster_config"),
             patch(
-                "opnsense_dyndns_hetzner.kubernetes_updater.client.NetworkingV1Api",
+                "wan_dns_sync.kubernetes_updater.client.NetworkingV1Api",
                 return_value=networking_api,
             ),
             patch(
-                "opnsense_dyndns_hetzner.kubernetes_updater.client.CustomObjectsApi",
+                "wan_dns_sync.kubernetes_updater.client.CustomObjectsApi",
                 return_value=custom_api,
             ),
         ):

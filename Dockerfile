@@ -11,5 +11,5 @@ RUN pip install --no-cache-dir .
 RUN useradd --create-home --shell /bin/bash appuser
 USER appuser
 
-ENTRYPOINT ["odh"]
-CMD ["--config", "/etc/opnsense-dyndns-hetzner/config.yaml"]
+ENTRYPOINT ["wan-dns-sync"]
+CMD ["--config", "/etc/wan-dns-sync/config.yaml"]

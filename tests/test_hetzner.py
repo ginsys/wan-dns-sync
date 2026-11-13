@@ -6,8 +6,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from opnsense_dyndns_hetzner.config import HetznerConfig
-from opnsense_dyndns_hetzner.hetzner import HetznerAPIError, HetznerDNSClient
+from wan_dns_sync.config import HetznerConfig
+from wan_dns_sync.hetzner import HetznerAPIError, HetznerDNSClient
 
 
 @pytest.fixture
@@ -43,7 +43,7 @@ class TestHetznerDNSClient:
         mock_zones_client: MagicMock,
     ) -> None:
         """Test successful zone retrieval."""
-        with patch("opnsense_dyndns_hetzner.hetzner.HCloudClient") as mock_hcloud:
+        with patch("wan_dns_sync.hetzner.HCloudClient") as mock_hcloud:
             mock_hcloud.return_value.zones = mock_zones_client
 
             with HetznerDNSClient(hetzner_config) as client:
@@ -57,7 +57,7 @@ class TestHetznerDNSClient:
         hetzner_config: HetznerConfig,
     ) -> None:
         """Test zone not found error."""
-        with patch("opnsense_dyndns_hetzner.hetzner.HCloudClient") as mock_hcloud:
+        with patch("wan_dns_sync.hetzner.HCloudClient") as mock_hcloud:
             mock_hcloud.return_value.zones.get_all.return_value = []
 
             with (
@@ -72,7 +72,7 @@ class TestHetznerDNSClient:
         mock_zones_client: MagicMock,
     ) -> None:
         """Test that zone is cached after first retrieval."""
-        with patch("opnsense_dyndns_hetzner.hetzner.HCloudClient") as mock_hcloud:
+        with patch("wan_dns_sync.hetzner.HCloudClient") as mock_hcloud:
             mock_hcloud.return_value.zones = mock_zones_client
 
             with HetznerDNSClient(hetzner_config) as client:
@@ -91,7 +91,7 @@ class TestHetznerDNSClient:
         """Test getting existing A record IPs."""
         mock_zones_client.get_rrset_all.return_value = [mock_hcloud_rrset]
 
-        with patch("opnsense_dyndns_hetzner.hetzner.HCloudClient") as mock_hcloud:
+        with patch("wan_dns_sync.hetzner.HCloudClient") as mock_hcloud:
             mock_hcloud.return_value.zones = mock_zones_client
 
             with HetznerDNSClient(hetzner_config) as client:
@@ -107,7 +107,7 @@ class TestHetznerDNSClient:
         """Test getting non-existent A record IPs."""
         mock_zones_client.get_rrset_all.return_value = []
 
-        with patch("opnsense_dyndns_hetzner.hetzner.HCloudClient") as mock_hcloud:
+        with patch("wan_dns_sync.hetzner.HCloudClient") as mock_hcloud:
             mock_hcloud.return_value.zones = mock_zones_client
 
             with HetznerDNSClient(hetzner_config) as client:
@@ -124,7 +124,7 @@ class TestHetznerDNSClient:
         """Test sync when no changes needed."""
         mock_zones_client.get_rrset_all.return_value = [mock_hcloud_rrset]
 
-        with patch("opnsense_dyndns_hetzner.hetzner.HCloudClient") as mock_hcloud:
+        with patch("wan_dns_sync.hetzner.HCloudClient") as mock_hcloud:
             mock_hcloud.return_value.zones = mock_zones_client
 
             with HetznerDNSClient(hetzner_config) as client:
@@ -143,7 +143,7 @@ class TestHetznerDNSClient:
         """Test sync when update needed."""
         mock_zones_client.get_rrset_all.return_value = [mock_hcloud_rrset]
 
-        with patch("opnsense_dyndns_hetzner.hetzner.HCloudClient") as mock_hcloud:
+        with patch("wan_dns_sync.hetzner.HCloudClient") as mock_hcloud:
             mock_hcloud.return_value.zones = mock_zones_client
 
             with HetznerDNSClient(hetzner_config) as client:
@@ -160,7 +160,7 @@ class TestHetznerDNSClient:
         """Test sync when create needed."""
         mock_zones_client.get_rrset_all.return_value = []
 
-        with patch("opnsense_dyndns_hetzner.hetzner.HCloudClient") as mock_hcloud:
+        with patch("wan_dns_sync.hetzner.HCloudClient") as mock_hcloud:
             mock_hcloud.return_value.zones = mock_zones_client
 
             with HetznerDNSClient(hetzner_config) as client:
@@ -178,7 +178,7 @@ class TestHetznerDNSClient:
         """Test sync when delete needed (empty IPs)."""
         mock_zones_client.get_rrset_all.return_value = [mock_hcloud_rrset]
 
-        with patch("opnsense_dyndns_hetzner.hetzner.HCloudClient") as mock_hcloud:
+        with patch("wan_dns_sync.hetzner.HCloudClient") as mock_hcloud:
             mock_hcloud.return_value.zones = mock_zones_client
 
             with HetznerDNSClient(hetzner_config) as client:
@@ -196,7 +196,7 @@ class TestHetznerDNSClient:
         """Test sync in dry run mode."""
         mock_zones_client.get_rrset_all.return_value = [mock_hcloud_rrset]
 
-        with patch("opnsense_dyndns_hetzner.hetzner.HCloudClient") as mock_hcloud:
+        with patch("wan_dns_sync.hetzner.HCloudClient") as mock_hcloud:
             mock_hcloud.return_value.zones = mock_zones_client
 
             with HetznerDNSClient(hetzner_config) as client:
@@ -214,7 +214,7 @@ class TestHetznerDNSClient:
         mock_zones_client: MagicMock,
     ) -> None:
         """Test successful health check."""
-        with patch("opnsense_dyndns_hetzner.hetzner.HCloudClient") as mock_hcloud:
+        with patch("wan_dns_sync.hetzner.HCloudClient") as mock_hcloud:
             mock_hcloud.return_value.zones = mock_zones_client
 
             with HetznerDNSClient(hetzner_config) as client:
@@ -225,7 +225,7 @@ class TestHetznerDNSClient:
         hetzner_config: HetznerConfig,
     ) -> None:
         """Test failed health check."""
-        with patch("opnsense_dyndns_hetzner.hetzner.HCloudClient") as mock_hcloud:
+        with patch("wan_dns_sync.hetzner.HCloudClient") as mock_hcloud:
             mock_hcloud.return_value.zones.get_all.side_effect = Exception("API Error")
 
             with HetznerDNSClient(hetzner_config) as client:

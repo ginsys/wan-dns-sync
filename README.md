@@ -1,6 +1,6 @@
-# opnsense-dyndns-hetzner
+# wan-dns-sync
 
-Dynamic DNS updater for Hetzner Cloud DNS using OPNsense WAN interface IPs.
+Syncs OPNsense WAN interface IPs to DNS A records (currently Hetzner Cloud DNS).
 
 ## Overview
 
@@ -33,7 +33,7 @@ docker run --rm \
   -e HETZNER_ZONE=example.com \
   -e RECORDS='home:wan' \
   -e DRY_RUN=true \
-  ghcr.io/ginsys/opnsense-dyndns-hetzner:main \
+  ghcr.io/ginsys/wan-dns-sync:main \
   --once --log-level debug
 ```
 
@@ -66,13 +66,13 @@ docker run --rm \
 The tool supports three configuration modes with the following priority:
 
 1. **Explicit config file**: `-c /path/to/config.yaml`
-2. **Default config file**: Auto-detected at `/etc/opnsense-dyndns-hetzner/config.yaml`
+2. **Default config file**: Auto-detected at `/etc/wan-dns-sync/config.yaml`
 3. **Environment variables only**: If no config file exists
 
 The tool logs which configuration source it uses at startup:
 
 ```json
-{"source": "default config: /etc/opnsense-dyndns-hetzner/config.yaml", "event": "Configuration loaded", "level": "info"}
+{"source": "default config: /etc/wan-dns-sync/config.yaml", "event": "Configuration loaded", "level": "info"}
 ```
 
 ### Mixing Config File with Environment Variables
@@ -123,11 +123,11 @@ records:
 
 ```bash
 docker run --rm \
-  -v ./config.yaml:/etc/opnsense-dyndns-hetzner/config.yaml:ro \
+  -v ./config.yaml:/etc/wan-dns-sync/config.yaml:ro \
   -e OPNSENSE_API_KEY='your-key' \
   -e OPNSENSE_API_SECRET='your-secret' \
   -e HCLOUD_TOKEN='your-token' \
-  ghcr.io/ginsys/opnsense-dyndns-hetzner:latest --once
+  ghcr.io/ginsys/wan-dns-sync:latest --once
 ```
 
 **Run with explicit config path:**
@@ -138,7 +138,7 @@ docker run --rm \
   -e OPNSENSE_API_KEY='your-key' \
   -e OPNSENSE_API_SECRET='your-secret' \
   -e HCLOUD_TOKEN='your-token' \
-  ghcr.io/ginsys/opnsense-dyndns-hetzner:latest -c /app/config.yaml --once
+  ghcr.io/ginsys/wan-dns-sync:latest -c /app/config.yaml --once
 ```
 
 ### Finding OPNsense Interface Names
@@ -178,10 +178,10 @@ If you use the wrong interface name, the tool will show available interfaces:
 1. Create the namespace and secret:
 
 ```bash
-kubectl create namespace opnsense-dyndns-hetzner
+kubectl create namespace wan-dns-sync
 
-kubectl create secret generic opnsense-dyndns-hetzner-secrets \
-  --namespace opnsense-dyndns-hetzner \
+kubectl create secret generic wan-dns-sync-secrets \
+  --namespace wan-dns-sync \
   --from-literal=OPNSENSE_API_KEY='your-key' \
   --from-literal=OPNSENSE_API_SECRET='your-secret' \
   --from-literal=HCLOUD_TOKEN='your-token'
@@ -228,13 +228,13 @@ pip install -e ".[dev]"
 make build
 
 # Or pull from registry
-docker pull ghcr.io/ginsys/opnsense-dyndns-hetzner:main
+docker pull ghcr.io/ginsys/wan-dns-sync:main
 ```
 
 ## CLI Options
 
 ```
-usage: odh [-h] [--config CONFIG] [--dry-run]
+usage: wan-dns-sync [-h] [--config CONFIG] [--dry-run]
            [--log-level {debug,info,warning,error}] [--once]
 
 Dynamic DNS updater for Hetzner Cloud DNS using OPNsense WAN IPs
@@ -242,7 +242,7 @@ Dynamic DNS updater for Hetzner Cloud DNS using OPNsense WAN IPs
 options:
   -h, --help            show this help message and exit
   --config CONFIG, -c CONFIG
-                        Path to config file (default: /etc/opnsense-dyndns-hetzner/config.yaml
+                        Path to config file (default: /etc/wan-dns-sync/config.yaml
                         if exists, else env vars)
   --dry-run             Don't make changes, just log what would be done
   --log-level {debug,info,warning,error}
@@ -318,7 +318,7 @@ kind: Ingress
 metadata:
   name: my-app
   labels:
-    ginsys.net/apex-dns: "true"  # Will be updated by opnsense-dyndns-hetzner
+    ginsys.net/apex-dns: "true"  # Will be updated by wan-dns-sync
   annotations:
     # annotation will be set automatically - no need to specify in manifest
 spec:
@@ -333,12 +333,12 @@ spec:
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: opnsense-dyndns-hetzner
+  name: wan-dns-sync
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: opnsense-dyndns-hetzner
+  name: wan-dns-sync
 rules:
 - apiGroups: ["networking.k8s.io"]
   resources: ["ingresses"]
@@ -350,14 +350,14 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: opnsense-dyndns-hetzner
+  name: wan-dns-sync
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: opnsense-dyndns-hetzner
+  name: wan-dns-sync
 subjects:
 - kind: ServiceAccount
-  name: opnsense-dyndns-hetzner
+  name: wan-dns-sync
   namespace: default
 ```
 
@@ -366,7 +366,7 @@ subjects:
 Output is JSON-formatted for easy parsing:
 
 ```json
-{"zone": "example.com", "interval": 300, "dry_run": false, "event": "Starting opnsense-dyndns-hetzner", "level": "info"}
+{"zone": "example.com", "interval": 300, "dry_run": false, "event": "Starting wan-dns-sync", "level": "info"}
 {"hostname": "test", "current": [], "desired": ["1.2.3.4"], "event": "Syncing A records", "level": "info"}
 {"hostname": "test", "ips": ["1.2.3.4"], "event": "Created A record", "level": "info"}
 ```
@@ -437,9 +437,9 @@ The CI workflow will automatically:
 - Create a GitHub release with auto-generated notes
 
 Container tags created for `v0.1.0`:
-- `ghcr.io/ginsys/opnsense-dyndns-hetzner:0.1.0`
-- `ghcr.io/ginsys/opnsense-dyndns-hetzner:0.1`
-- `ghcr.io/ginsys/opnsense-dyndns-hetzner:latest`
+- `ghcr.io/ginsys/wan-dns-sync:0.1.0`
+- `ghcr.io/ginsys/wan-dns-sync:0.1`
+- `ghcr.io/ginsys/wan-dns-sync:latest`
 
 ## License
 

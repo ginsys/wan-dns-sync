@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from opnsense_dyndns_hetzner.config import (
+from wan_dns_sync.config import (
     Config,
     _process_env_vars,
     _substitute_env_vars,

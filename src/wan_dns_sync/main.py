@@ -1,4 +1,4 @@
-"""Main entry point for opnsense-dyndns-hetzner."""
+"""Main entry point for wan-dns-sync."""
 
 from __future__ import annotations
 
@@ -201,7 +201,7 @@ def main() -> None:
     configure_logging(args.log_level)
     logger = structlog.get_logger()
 
-    logger.info("opnsense-dyndns-hetzner starting", version="0.4.0")
+    logger.info("wan-dns-sync starting", version="0.4.0")
 
     # Load configuration from file or environment
     try:
@@ -215,7 +215,7 @@ def main() -> None:
     dry_run = args.dry_run or config.settings.dry_run
 
     logger.info(
-        "Starting opnsense-dyndns-hetzner",
+        "Starting wan-dns-sync",
         zone=config.hetzner.zone,
         interval=config.settings.interval,
         dry_run=dry_run,

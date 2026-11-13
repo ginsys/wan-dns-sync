@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import dns.resolver
 
-from opnsense_dyndns_hetzner.verify import (
+from wan_dns_sync.verify import (
     resolve_nameserver_ips,
     verify_a_records,
 )

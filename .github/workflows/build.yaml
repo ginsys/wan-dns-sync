@@ -8,7 +8,7 @@ on:
     branches: [main]
 
 env:
-  IMAGE: ghcr.io/ginsys/opnsense-dyndns-hetzner
+  IMAGE: ghcr.io/ginsys/wan-dns-sync
 
 jobs:
   test:

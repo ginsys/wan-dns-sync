@@ -1,8 +1,10 @@
 """Kubernetes Ingress/HTTPRoute annotation updater for apex DNS."""
 
+from typing import Any, cast
+
 import structlog
 from kubernetes import client, config
-from kubernetes.client.rest import ApiException
+from kubernetes.client import ApiException
 
 logger = structlog.get_logger(__name__)
 
@@ -52,7 +54,7 @@ def update_apex_dns_annotations(
 
     try:
         # Load in-cluster config
-        config.load_incluster_config()
+        config.load_incluster_config()  # type: ignore[no-untyped-call]
     except config.ConfigException:
         logger.error("Failed to load in-cluster kubernetes config")
         return False
@@ -110,17 +112,18 @@ def _update_ingresses(
     updated = False
 
     try:
-        ingresses = networking_v1_api.list_ingress_for_all_namespaces(
-            label_selector=label_selector
-        )
+        ingresses = networking_v1_api.list_ingress_for_all_namespaces(label_selector=label_selector)
     except ApiException as e:
         logger.error("Failed to list ingresses", error=str(e))
         return False
 
     for ing in ingresses.items:
-        namespace = ing.metadata.namespace
-        name = ing.metadata.name
-        current = _current_annotations(ing.metadata.annotations or {})
+        meta = ing.metadata
+        if meta is None or not meta.name or not meta.namespace:
+            continue
+        namespace = meta.namespace
+        name = meta.name
+        current = _current_annotations(meta.annotations or {})
 
         if _is_current(current, target_value):
             logger.debug(
@@ -172,11 +175,14 @@ def _update_httproutes(
     updated = False
 
     try:
-        httproutes = custom_api.list_cluster_custom_object(
-            group="gateway.networking.k8s.io",
-            version="v1",
-            plural="httproutes",
-            label_selector=label_selector,
+        httproutes = cast(
+            dict[str, Any],
+            custom_api.list_cluster_custom_object(
+                group="gateway.networking.k8s.io",
+                version="v1",
+                plural="httproutes",
+                label_selector=label_selector,
+            ),
         )
     except ApiException as e:
         logger.error("Failed to list httproutes", error=str(e))

@@ -151,6 +151,69 @@ def test_provider_failure_fails_the_cycle_and_retries_in_full() -> None:
     assert h.stored[("test", "A")]["values"] == ["1.2.3.4"]
 
 
+def test_failure_after_an_earlier_success_is_retried_when_the_addresses_flap_back() -> None:
+    """A failed write may leave the zone half changed, even when the next cycle wants the
+    addresses that were last applied; skipping that cycle would leave it that way."""
+    h = Harness()
+    assert h.updater.run_cycle() is True  # applied: wan1 = 1.2.3.4
+
+    h.ips = {"wan1": "1.1.1.1", "wan2": "5.6.7.8"}
+    h.provider.fail_apply = RuntimeError("API down")
+    h.now = 60
+    assert h.updater.run_cycle() is False
+
+    h.provider.fail_apply = None
+    h.ips = IPS  # back to the last applied addresses, well before the reconcile interval
+    h.provider.zones[ZONE][("test", "A")]["values"] = ["1.1.1.1"]  # what the failed write left
+    h.now = 120
+    assert h.updater.run_cycle() is True
+
+    assert h.stored[("test", "A")]["values"] == ["1.2.3.4"]
+
+
+def test_failed_verification_is_retried_until_it_passes() -> None:
+    h = Harness()
+    h.verify_result = False
+    assert h.updater.run_cycle() is False
+    assert h.updater.run_cycle() is False  # the zone now matches, but is still unverified
+    verified_before = len(h.verified)
+
+    h.verify_result = True
+    assert h.updater.run_cycle() is True
+
+    assert len(h.verified) > verified_before
+    h.verified.clear()
+    assert h.updater.run_cycle() is True
+    assert h.verified == []  # verified once, not again
+
+
+def test_each_syncing_cycle_builds_a_fresh_provider() -> None:
+    """A provider instance caches a zone's records, so none may live across cycles."""
+    h = Harness()
+    h.updater.run_cycle()
+    first = h.loads
+
+    h.now = 3601  # reconcile due
+    h.updater.run_cycle()
+
+    assert h.loads == 2 * first
+
+
+def test_annotations_are_reconciled_when_dns_is_skipped() -> None:
+    config = make_config(
+        kubernetes={"enabled": True, "label_selector": "a=b", "interfaces": ["wan1"]}
+    )
+    h = Harness(config)
+    h.updater.run_cycle()
+    loads = h.loads
+
+    h.now = 60  # unchanged addresses: DNS is skipped
+    h.updater.run_cycle()
+
+    assert h.loads == loads
+    assert len(h.annotations) == 2
+
+
 def test_one_failing_provider_does_not_stop_the_other() -> None:
     config = make_config(
         providers={

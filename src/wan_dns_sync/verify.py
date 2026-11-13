@@ -8,12 +8,14 @@ import structlog
 logger = structlog.get_logger()
 
 
-def zone_nameservers(zone: str, timeout: float = 5.0) -> dict[str, list[str]]:
+def zone_nameservers(zone: str, timeout: float = 5.0) -> dict[str, list[str] | None]:
     """The zone's nameservers and their addresses (IPv4 and IPv6).
 
-    A nameserver whose address cannot be found maps to an empty list, so the caller
-    can fail on it instead of silently verifying against fewer servers. An empty dict
-    means the NS lookup itself failed.
+    A nameserver maps to None when an address lookup failed (timeout, SERVFAIL), and
+    to an empty list when it has no address at all. Both make the caller fail it,
+    instead of silently verifying against fewer servers. Only a confirmed "no such
+    record" (NoAnswer, NXDOMAIN) counts as the absence of an address family. An empty
+    dict means the NS lookup itself failed.
     """
     resolver = dns.resolver.Resolver()
     resolver.lifetime = timeout
@@ -24,15 +26,26 @@ def zone_nameservers(zone: str, timeout: float = 5.0) -> dict[str, list[str]]:
         logger.warning("Could not look up zone nameservers", zone=zone, error=str(e))
         return {}
 
-    servers: dict[str, list[str]] = {}
+    servers: dict[str, list[str] | None] = {}
     for ns in names:
         addresses: list[str] = []
+        failed = False
         for rdtype in ("A", "AAAA"):
             try:
-                addresses.extend(rdata.address for rdata in resolver.resolve(ns, rdtype))
-            except Exception:
+                found = [rdata.address for rdata in resolver.resolve(ns, rdtype)]
+            except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN):
                 continue
-        servers[ns] = addresses
+            except Exception as e:
+                logger.warning(
+                    "Could not look up a nameserver address",
+                    nameserver=ns,
+                    rdtype=rdtype,
+                    error=str(e),
+                )
+                failed = True
+                break
+            addresses.extend(found)
+        servers[ns] = None if failed else addresses
     return servers
 
 
@@ -64,7 +77,7 @@ def verify_a_records(
     ok = True
     checked = 0
     for ns, ns_ips in servers.items():
-        if not ns_ips:
+        if not ns_ips:  # None: a lookup failed; []: no address exists
             logger.warning("Nameserver has no address to verify against", nameserver=ns, zone=zone)
             ok = False
             continue

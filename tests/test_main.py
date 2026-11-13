@@ -187,6 +187,36 @@ def test_failed_verification_is_retried_until_it_passes() -> None:
     assert h.verified == []  # verified once, not again
 
 
+def test_pending_verification_survives_a_record_losing_its_interface() -> None:
+    h = Harness()
+    h.verify_result = False
+    h.updater.run_cycle()  # "test" and "multi" written, not verified
+
+    h.verify_result = True
+    h.ips = {"wan2": "5.6.7.8"}  # wan1 is down: "test" has no address this cycle
+    h.now = 60
+    h.verified.clear()
+    assert h.updater.run_cycle() is True
+
+    assert ("test", ZONE, {"1.2.3.4"}) in h.verified  # still checked, against what was written
+    assert h.updater._unverified == {}  # checked only until it passed
+
+
+def test_a_write_whose_response_was_lost_is_verified_on_the_retry() -> None:
+    h = Harness()
+    h.verify_result = False
+    h.provider.fail_after_apply = RuntimeError("timeout after the write")
+    assert h.updater.run_cycle() is False
+
+    h.provider.fail_after_apply = None
+    h.verify_result = True
+    h.verified.clear()
+    h.now = 60
+    assert h.updater.run_cycle() is True  # the provider already matches: nothing to apply
+
+    assert {v[0] for v in h.verified} == {"test", "multi"}
+
+
 def test_each_syncing_cycle_builds_a_fresh_provider() -> None:
     """A provider instance caches a zone's records, so none may live across cycles."""
     h = Harness()

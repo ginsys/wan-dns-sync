@@ -57,6 +57,18 @@ class TestZoneNameservers:
             resolver.return_value.resolve = resolve
             assert zone_nameservers("example.com") == {"v6.example.net.": ["2001:db8::1"]}
 
+    def test_a_failed_address_lookup_is_not_an_absent_address(self) -> None:
+        def resolve(name: str, rdtype: str) -> MagicMock:
+            if rdtype == "NS":
+                return _answer(_ns("ns1.example.net."))
+            if rdtype == "AAAA":
+                raise dns.resolver.LifetimeTimeout()
+            return _answer(_rdata("1.1.1.1"))
+
+        with patch("dns.resolver.Resolver") as resolver:
+            resolver.return_value.resolve = resolve
+            assert zone_nameservers("example.com") == {"ns1.example.net.": None}
+
     def test_ns_lookup_failure_returns_nothing(self) -> None:
         with patch("dns.resolver.Resolver") as resolver:
             resolver.return_value.resolve.side_effect = dns.resolver.NXDOMAIN()
@@ -100,6 +112,14 @@ class TestVerifyARecords:
 
     def test_a_nameserver_without_an_address_fails_even_when_the_others_match(self) -> None:
         servers = {"bad.": [], "ns2.": ["2.2.2.2"]}
+        with (
+            patch.object(verify, "zone_nameservers", return_value=servers),
+            patch.object(verify, "_answers", return_value={"10.0.0.1"}),
+        ):
+            assert verify_a_records("test", "example.com", {"10.0.0.1"}) is False
+
+    def test_a_nameserver_whose_lookup_failed_fails_even_when_the_others_match(self) -> None:
+        servers = {"ns1.": None, "ns2.": ["2.2.2.2"]}
         with (
             patch.object(verify, "zone_nameservers", return_value=servers),
             patch.object(verify, "_answers", return_value={"10.0.0.1"}),

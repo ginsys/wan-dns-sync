@@ -124,7 +124,8 @@ class Updater:
         self._clock = clock
         self._last_applied: Desired | None = None
         self._last_reconcile = 0.0
-        self._unverified: set[str] = set()  # zones written but not yet seen at every nameserver
+        # zone -> record -> addresses written but not yet seen at every nameserver
+        self._unverified: dict[str, dict[str, set[str]]] = {}
 
     def _desired(self, interface_ips: dict[str, str]) -> Desired:
         """Addresses per owned record. A record with none is left out, so it is never deleted."""
@@ -155,21 +156,18 @@ class Updater:
         ok = True
         any_changes = False
         for zone, owned in desired.items():
-            if not owned:
-                self._unverified.discard(zone)
-                continue
             zone_config = self.config.zones[zone]
-            zone_changed = False
-            for provider_name in zone_config.providers:
+            written = False  # a write was made, or may have been (an apply that raised)
+            for provider_name in zone_config.providers if owned else []:
                 try:
                     provider = self._load_provider(
                         provider_name, self.config.providers[provider_name]
                     )
-                    zone_changed |= sync_zone(
-                        provider, zone, owned, zone_config.ttl, self.dry_run
-                    )
+                    if sync_zone(provider, zone, owned, zone_config.ttl, self.dry_run):
+                        any_changes = written = True
                 except Exception as e:
                     ok = False
+                    written = True
                     logger.error(
                         "Failed to sync DNS records",
                         zone=zone,
@@ -179,16 +177,18 @@ class Updater:
                     )
             if self.dry_run:
                 continue
-            if zone_changed:
-                any_changes = True
-                self._unverified.add(zone)
+            if written:
+                # Remember what was written until a check passes: the retry finds no
+                # change to apply, and must not read that as a verified zone. A record
+                # that has no address this cycle keeps its pending expectation.
+                pending = self._unverified.setdefault(zone, {})
+                pending.update({name: set(addresses) for name, addresses in owned.items()})
                 self._sleep(self.config.settings.verify_delay)
-            if zone in self._unverified:
-                # A zone stays unverified until a check passes: the retry finds no
-                # change to apply, and must not read that as a verified zone.
-                results = [self._verify(name, zone, set(a)) for name, a in owned.items()]
+            pending = self._unverified.get(zone, {})
+            if pending:
+                results = [self._verify(n, zone, addrs) for n, addrs in pending.items()]
                 if all(results):
-                    self._unverified.discard(zone)
+                    del self._unverified[zone]
                 else:
                     ok = False
         if not any_changes:

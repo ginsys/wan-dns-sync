@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -119,32 +120,44 @@ class TestOPNsenseClient:
         ):
             client.get_interface_ips()
 
+    @pytest.mark.parametrize(
+        "address",
+        ["10.0.0.1", "192.168.1.1", "100.64.0.1", "169.254.1.1", "127.0.0.1", "not-an-ip", "::1"],
+    )
     @respx.mock
-    def test_health_check_success(
-        self,
-        opnsense_config: OPNsenseConfig,
-        mock_opnsense_response: dict[str, Any],
+    def test_non_public_address_is_skipped(
+        self, opnsense_config: OPNsenseConfig, address: str
     ) -> None:
-        """Test successful health check."""
+        response = {"wan": {"ipv4": [{"ipaddr": address}]}, "opt1": {"ipaddr": "5.6.7.8"}}
         respx.get("https://opnsense.local/api/diagnostics/interface/getInterfaceConfig").mock(
-            return_value=httpx.Response(200, json=mock_opnsense_response)
+            return_value=httpx.Response(200, json=response)
         )
 
         with OPNsenseClient(opnsense_config) as client:
-            assert client.health_check() is True
+            assert client.get_interface_ips() == {"wan2": "5.6.7.8"}
 
     @respx.mock
-    def test_health_check_failure(
-        self,
-        opnsense_config: OPNsenseConfig,
-    ) -> None:
-        """Test failed health check."""
+    def test_private_address_allowed_by_setting(self, opnsense_config: OPNsenseConfig) -> None:
+        response = {"wan": {"ipv4": [{"ipaddr": "10.0.0.1"}]}}
         respx.get("https://opnsense.local/api/diagnostics/interface/getInterfaceConfig").mock(
-            return_value=httpx.Response(401, text="Unauthorized")
+            return_value=httpx.Response(200, json=response)
         )
 
-        with OPNsenseClient(opnsense_config) as client:
-            assert client.health_check() is False
+        with OPNsenseClient(opnsense_config, allow_private_ips=True) as client:
+            assert client.get_interface_ips() == {"wan1": "10.0.0.1"}
+
+    def test_ca_file_is_used_for_verification(self, tmp_path: Path) -> None:
+        ca = tmp_path / "ca.pem"
+        config = OPNsenseConfig(
+            url="https://opnsense.local",
+            key="key",
+            secret="secret",
+            ca_file=ca,
+            interfaces={"wan": "wan"},
+        )
+        with patch("httpx.Client") as mock_client:
+            OPNsenseClient(config)
+        assert mock_client.call_args.kwargs["verify"] == str(ca)
 
     def test_verify_ssl_disabled(self) -> None:
         """Test that verify_ssl=False is passed to httpx client."""

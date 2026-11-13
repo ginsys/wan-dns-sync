@@ -7,14 +7,17 @@ import logging
 import signal
 import sys
 import time
+from collections.abc import Callable
 from http.server import HTTPServer
 from pathlib import Path
 
 import structlog
+from octodns.provider.base import BaseProvider
 
-from .config import DEFAULT_CONFIG_PATH, Config, load_config_auto
-from .health import start_health_server
-from .hetzner import HetznerDNSClient
+from . import __version__
+from .config import DEFAULT_CONFIG_PATH, Config, load_config
+from .dns import load_provider, sync_zone
+from .health import HealthState, start_health_server
 from .kubernetes_updater import update_apex_dns_annotations
 from .opnsense import OPNsenseClient
 from .verify import verify_a_records
@@ -25,6 +28,13 @@ LOG_LEVELS = {
     "warning": logging.WARNING,
     "error": logging.ERROR,
 }
+
+Desired = dict[str, dict[str, list[str]]]  # zone -> record name -> addresses
+
+
+def _addresses(interfaces: list[str], interface_ips: dict[str, str]) -> list[str]:
+    """Sorted distinct addresses of the named interfaces that currently have one."""
+    return sorted({interface_ips[i] for i in interfaces if i in interface_ips})
 
 
 def configure_logging(level: str) -> None:
@@ -49,13 +59,14 @@ def configure_logging(level: str) -> None:
 def parse_args() -> argparse.Namespace:
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description="Dynamic DNS updater for Hetzner Cloud DNS using OPNsense WAN IPs"
+        description="Keep DNS A records in step with the WAN addresses of an OPNsense router"
     )
     parser.add_argument(
         "--config",
         "-c",
         type=Path,
-        help=f"Path to config file (default: {DEFAULT_CONFIG_PATH} if exists, else env vars)",
+        default=DEFAULT_CONFIG_PATH,
+        help=f"Path to config file (default: {DEFAULT_CONFIG_PATH})",
     )
     parser.add_argument(
         "--dry-run",
@@ -71,7 +82,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--once",
         action="store_true",
-        help="Run once and exit (don't loop)",
+        help="Run once and exit (non-zero if the cycle failed)",
     )
     return parser.parse_args()
 
@@ -85,114 +96,136 @@ class GracefulShutdown:
         signal.signal(signal.SIGINT, self._handler)
 
     def _handler(self, signum: int, frame: object) -> None:
-        logger = structlog.get_logger()
-        logger.info("Received shutdown signal", signal=signum)
+        structlog.get_logger().info("Received shutdown signal", signal=signum)
         self.should_exit = True
 
 
-def run_update(
-    config: Config,
-    opnsense: OPNsenseClient,
-    hetzner: HetznerDNSClient,
-    dry_run: bool,
-) -> None:
-    """Run a single update cycle."""
-    logger = structlog.get_logger()
-    any_changes = False
+class Updater:
+    """One update cycle: read the WAN addresses, write DNS, maintain annotations."""
 
-    # Get current IPs from OPNsense
-    try:
-        interface_ips = opnsense.get_interface_ips()
-    except Exception as e:
-        logger.error("Failed to get IPs from OPNsense", error=str(e))
-        return
+    def __init__(
+        self,
+        config: Config,
+        opnsense: OPNsenseClient,
+        dry_run: bool,
+        provider_loader: Callable[[str, dict[str, object]], BaseProvider] = load_provider,
+        verify: Callable[[str, str, set[str]], bool] = verify_a_records,
+        annotate: Callable[..., bool] = update_apex_dns_annotations,
+        sleep: Callable[[float], None] = time.sleep,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self.config = config
+        self.opnsense = opnsense
+        self.dry_run = dry_run
+        self._load_provider = provider_loader
+        self._verify = verify
+        self._annotate = annotate
+        self._sleep = sleep
+        self._clock = clock
+        self._last_applied: Desired | None = None
+        self._last_reconcile = 0.0
 
-    if not interface_ips:
-        logger.warning("No interface IPs found")
-        return
+    def _desired(self, interface_ips: dict[str, str]) -> Desired:
+        """Addresses per owned record. A record with none is left out, so it is never deleted."""
+        logger = structlog.get_logger()
+        desired: Desired = {}
+        for zone, zone_config in self.config.zones.items():
+            records: dict[str, list[str]] = {}
+            for record in zone_config.records:
+                missing = [i for i in record.interfaces if i not in interface_ips]
+                if missing:
+                    logger.warning(
+                        "Missing interfaces for record",
+                        record=record.name,
+                        zone=zone,
+                        missing=missing,
+                    )
+                addresses = _addresses(record.interfaces, interface_ips)
+                if addresses:
+                    records[record.name] = addresses
+                else:
+                    logger.warning("No IPs available for record, skipping", record=record.name)
+            desired[zone] = records
+        return desired
 
-    logger.debug("Retrieved interface IPs", ips=interface_ips)
-
-    # Process each record
-    for record in config.records:
-        # Gather IPs for this record's interfaces
-        desired_ips: list[str] = []
-        missing_interfaces: list[str] = []
-
-        for iface in record.interfaces:
-            if iface in interface_ips:
-                desired_ips.append(interface_ips[iface])
-            else:
-                missing_interfaces.append(iface)
-
-        if missing_interfaces:
-            logger.warning(
-                "Missing interfaces for record",
-                hostname=record.hostname,
-                missing=missing_interfaces,
-            )
-
-        desired_ips = sorted(set(desired_ips))
-
-        if not desired_ips:
-            logger.warning(
-                "No IPs available for record, skipping",
-                hostname=record.hostname,
-            )
-            continue
-
-        # Sync DNS records
-        try:
-            changed = hetzner.sync_a_records(
-                record.hostname, desired_ips, dry_run=dry_run
-            )
-
-            if changed:
-                any_changes = True
-
-            # Verify DNS if changes were made (and not dry run)
-            if changed and not dry_run:
-                # Wait for DNS propagation before verification
-                time.sleep(config.settings.verify_delay)
-                verify_a_records(
-                    record.hostname,
-                    config.hetzner.zone,
-                    set(desired_ips),
-                )
-
-            # If kubernetes integration is enabled and this is the trigger hostname,
-            # reconcile annotations
-            if (
-                config.kubernetes.enabled
-                and record.hostname == config.kubernetes.trigger_hostname
-            ):
-                logger.info(
-                    "Reconciling kubernetes annotations",
-                    hostname=record.hostname,
-                    ips=desired_ips,
-                    changed=changed,
-                )
+    def _sync_dns(self, desired: Desired) -> bool:
+        """Write every zone to every provider. True when all of it succeeded."""
+        logger = structlog.get_logger()
+        ok = True
+        any_changes = False
+        for zone, owned in desired.items():
+            if not owned:
+                continue
+            zone_config = self.config.zones[zone]
+            zone_changed = False
+            for provider_name in zone_config.providers:
                 try:
-                    update_apex_dns_annotations(
-                        ips=desired_ips,
-                        label_selector=config.kubernetes.label_selector,
-                        dry_run=dry_run,
+                    provider = self._load_provider(
+                        provider_name, self.config.providers[provider_name]
                     )
-                except Exception as k8s_error:
+                    zone_changed |= sync_zone(
+                        provider, zone, owned, zone_config.ttl, self.dry_run
+                    )
+                except Exception as e:
+                    ok = False
                     logger.error(
-                        "Failed to update kubernetes annotations",
-                        hostname=record.hostname,
-                        error=str(k8s_error),
+                        "Failed to sync DNS records",
+                        zone=zone,
+                        provider=provider_name,
+                        error_type=type(e).__name__,
+                        error=str(e),
                     )
-        except Exception as e:
-            logger.error(
-                "Failed to sync DNS records",
-                hostname=record.hostname,
-                error=str(e),
-            )
+            if zone_changed and not self.dry_run:
+                any_changes = True
+                self._sleep(self.config.settings.verify_delay)
+                for name, addresses in owned.items():
+                    if not self._verify(name, zone, set(addresses)):
+                        ok = False
+        if not any_changes:
+            logger.info("No DNS changes applied")
+        return ok
 
-    if not any_changes:
-        logger.info("No DNS changes needed, all records up to date")
+    def run_cycle(self) -> bool:
+        """Run one cycle. True when every part of it succeeded."""
+        logger = structlog.get_logger()
+
+        try:
+            interface_ips = self.opnsense.get_interface_ips()
+        except Exception as e:
+            logger.error("Failed to get IPs from OPNsense", error=str(e))
+            return False
+        if not interface_ips:
+            logger.warning("No interface IPs found")
+            return False
+        logger.debug("Retrieved interface IPs", ips=interface_ips)
+
+        ok = True
+        desired = self._desired(interface_ips)
+        now = self._clock()
+        reconcile_due = now - self._last_reconcile >= self.config.settings.reconcile_interval
+        if desired != self._last_applied or reconcile_due:
+            if self._sync_dns(desired):
+                self._last_applied = desired
+                self._last_reconcile = now
+            else:
+                self._last_applied = None  # retry in full next cycle
+                ok = False
+        else:
+            logger.debug("Addresses unchanged since the last sync, skipping DNS")
+
+        kubernetes = self.config.kubernetes
+        if kubernetes.enabled and kubernetes.label_selector:
+            addresses = _addresses(kubernetes.interfaces, interface_ips)
+            try:
+                self._annotate(
+                    ips=addresses,
+                    label_selector=kubernetes.label_selector,
+                    dry_run=self.dry_run,
+                )
+            except Exception as e:
+                ok = False
+                logger.error("Failed to update kubernetes annotations", error=str(e))
+        return ok
 
 
 def main() -> None:
@@ -201,72 +234,56 @@ def main() -> None:
     configure_logging(args.log_level)
     logger = structlog.get_logger()
 
-    logger.info("wan-dns-sync starting", version="0.4.0")
+    logger.info("wan-dns-sync starting", version=__version__)
 
-    # Load configuration from file or environment
     try:
-        config, config_source = load_config_auto(args.config)
-        logger.info("Configuration loaded", source=config_source)
+        config = load_config(args.config)
     except Exception as e:
-        logger.error("Failed to load configuration", error=str(e))
+        logger.error("Failed to load configuration", path=str(args.config), error=str(e))
         sys.exit(1)
 
-    # Override dry_run from CLI if specified
     dry_run = args.dry_run or config.settings.dry_run
-
     logger.info(
-        "Starting wan-dns-sync",
-        zone=config.hetzner.zone,
+        "Configuration loaded",
+        zones=sorted(config.zones),
+        providers=sorted(config.providers),
         interval=config.settings.interval,
+        reconcile_interval=config.settings.reconcile_interval,
         dry_run=dry_run,
-        record_count=len(config.records),
-        health_port=config.settings.health_port,
     )
 
     shutdown = GracefulShutdown()
+    health = HealthState(config.settings.interval)
     health_server: HTTPServer | None = None
+    exit_code = 0
 
-    with (
-        OPNsenseClient(config.opnsense) as opnsense,
-        HetznerDNSClient(config.hetzner) as hetzner,
-    ):
-        # Start health server if configured
+    with OPNsenseClient(config.opnsense, config.settings.allow_private_ips) as opnsense:
         if config.settings.health_port:
+            health_server = start_health_server(config.settings.health_port, health)
 
-            def ready_check() -> bool:
-                return opnsense.health_check(timeout=2.0) and hetzner.health_check()
-
-            health_server = start_health_server(
-                config.settings.health_port, ready_check
-            )
-
+        updater = Updater(config, opnsense, dry_run)
         iteration = 0
         while not shutdown.should_exit:
             iteration += 1
             logger.info("Starting update cycle", iteration=iteration)
-
-            run_update(config, opnsense, hetzner, dry_run)
+            ok = updater.run_cycle()
+            health.cycle_done(ok)
 
             if args.once:
-                logger.info("Single run complete, exiting")
+                exit_code = 0 if ok else 1
                 break
 
-            logger.info(
-                "Update cycle complete, sleeping",
-                iteration=iteration,
-                next_check_seconds=config.settings.interval,
-            )
-
-            # Sleep with interrupt checking
             for _ in range(config.settings.interval):
                 if shutdown.should_exit:
                     break
+                health.beat()
                 time.sleep(1)
 
         if health_server:
             health_server.shutdown()
 
     logger.info("Shutdown complete")
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":

@@ -1,29 +1,32 @@
 opnsense:
-  url: "https://rigel.office.ginsys.net/api"
+  url: "https://opnsense.example.com/api"
   key: "${OPNSENSE_API_KEY}"
   secret: "${OPNSENSE_API_SECRET}"
   verify_ssl: true
   interfaces:
     # Logical name -> OPNsense interface name
     # To find interface names, see README.md
-    telenet: "wan"
-    telenet2: "opt1"
+    wan1: "wan"
+    wan2: "opt1"
 
-hetzner:
-  token: "${HCLOUD_TOKEN}"
-  zone: "ginsys.net"
-  ttl: 300
+providers:
+  hetzner:
+    class: octodns_hetzner.HetznerProvider
+    token: "${HCLOUD_TOKEN}"
+    backend: hcloud
+
+zones:
+  example.com:
+    providers: [hetzner]
+    ttl: 300
+    records:
+      - name: office
+        interfaces: [wan2]
+      - name: home
+        interfaces: [wan1]
+      - name: server
+        interfaces: [wan1, wan2]
 
 settings:
-  interval: 300  # seconds between checks
-  dry_run: false
-  health_port: 8080  # Enable health endpoints for K8s probes
-  verify_delay: 2.0  # Seconds to wait before DNS verification
-
-records:
-  - hostname: office
-    interfaces: [telenet2]
-  - hostname: stuiver
-    interfaces: [telenet]
-  - hostname: st32
-    interfaces: [telenet, telenet2]
+  interval: 300 # seconds between checks
+  health_port: 8080 # health endpoints for K8s probes

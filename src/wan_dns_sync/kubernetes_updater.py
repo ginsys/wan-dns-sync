@@ -16,10 +16,17 @@ TARGET_ANNOTATION_KEY = "external-dns.kubernetes.io/target"
 # patch `null`), so a stale target does not linger on the resource.
 STALE_ANNOTATION_KEYS: tuple[str, ...] = ("external-dns.alpha.kubernetes.io/target",)
 
+# A hung API server must not hang the update loop.
+REQUEST_TIMEOUT = 30
+
+
+class KubernetesUpdateError(Exception):
+    """A list or patch call failed; the caller reports the cycle as failed."""
+
 
 def update_apex_dns_annotations(
     ips: list[str],
-    label_selector: str = "ginsys.net/apex-dns=true",
+    label_selector: str,
     dry_run: bool = False,
 ) -> bool:
     """
@@ -36,6 +43,9 @@ def update_apex_dns_annotations(
 
     Returns:
         True if any resources were updated, False otherwise
+
+    Raises:
+        KubernetesUpdateError: when the cluster cannot be reached or a patch failed.
     """
     if not ips:
         logger.warning("No IPs provided for kubernetes annotation update")
@@ -55,9 +65,8 @@ def update_apex_dns_annotations(
     try:
         # Load in-cluster config
         config.load_incluster_config()  # type: ignore[no-untyped-call,unused-ignore]
-    except config.ConfigException:
-        logger.error("Failed to load in-cluster kubernetes config")
-        return False
+    except config.ConfigException as e:
+        raise KubernetesUpdateError("no in-cluster kubernetes config") from e
 
     # Update Ingresses
     updated |= _update_ingresses(
@@ -110,12 +119,14 @@ def _update_ingresses(
 ) -> bool:
     """Update Ingress resources with the target annotation."""
     updated = False
+    failures = 0
 
     try:
-        ingresses = networking_v1_api.list_ingress_for_all_namespaces(label_selector=label_selector)
+        ingresses = networking_v1_api.list_ingress_for_all_namespaces(
+            label_selector=label_selector, _request_timeout=REQUEST_TIMEOUT
+        )
     except ApiException as e:
-        logger.error("Failed to list ingresses", error=str(e))
-        return False
+        raise KubernetesUpdateError(f"listing ingresses: {e}") from e
 
     for ing in ingresses.items:
         meta = ing.metadata
@@ -150,9 +161,11 @@ def _update_ingresses(
                     name=name,
                     namespace=namespace,
                     body=_patch_body(target_value),
+                    _request_timeout=REQUEST_TIMEOUT,
                 )
                 updated = True
             except ApiException as e:
+                failures += 1
                 logger.error(
                     "Failed to patch ingress",
                     namespace=namespace,
@@ -162,6 +175,8 @@ def _update_ingresses(
         else:
             updated = True
 
+    if failures:
+        raise KubernetesUpdateError(f"{failures} ingress patch(es) failed")
     return updated
 
 
@@ -173,6 +188,7 @@ def _update_httproutes(
 ) -> bool:
     """Update HTTPRoute resources with the target annotation."""
     updated = False
+    failures = 0
 
     try:
         httproutes = cast(
@@ -182,11 +198,11 @@ def _update_httproutes(
                 version="v1",
                 plural="httproutes",
                 label_selector=label_selector,
+                _request_timeout=REQUEST_TIMEOUT,
             ),
         )
     except ApiException as e:
-        logger.error("Failed to list httproutes", error=str(e))
-        return False
+        raise KubernetesUpdateError(f"listing httproutes: {e}") from e
 
     for route in httproutes.get("items", []):
         namespace = route["metadata"]["namespace"]
@@ -221,9 +237,11 @@ def _update_httproutes(
                     name=name,
                     namespace=namespace,
                     body=_patch_body(target_value),
+                    _request_timeout=REQUEST_TIMEOUT,
                 )
                 updated = True
             except ApiException as e:
+                failures += 1
                 logger.error(
                     "Failed to patch httproute",
                     namespace=namespace,
@@ -233,4 +251,6 @@ def _update_httproutes(
         else:
             updated = True
 
+    if failures:
+        raise KubernetesUpdateError(f"{failures} httproute patch(es) failed")
     return updated

@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import dns.exception
-import dns.message
+import dns.flags
 import dns.resolver
 import pytest
 
@@ -32,12 +31,13 @@ def _ns(target: str) -> MagicMock:
 
 
 class TestZoneNameservers:
-    def test_resolves_every_ns_of_the_zone(self) -> None:
+    def test_resolves_the_ipv4_address_of_every_ns(self) -> None:
+        asked: list[str] = []
+
         def resolve(name: str, rdtype: str) -> MagicMock:
+            asked.append(rdtype)
             if rdtype == "NS":
                 return _answer(_ns("ns1.example.net."), _ns("ns2.example.net."))
-            if rdtype == "AAAA":
-                raise dns.resolver.NoAnswer()
             addresses = {"ns1.example.net.": "1.1.1.1", "ns2.example.net.": "2.2.2.2"}
             return _answer(_rdata(addresses[name]))
 
@@ -47,26 +47,13 @@ class TestZoneNameservers:
                 "ns1.example.net.": ["1.1.1.1"],
                 "ns2.example.net.": ["2.2.2.2"],
             }
-
-    def test_ipv6_only_nameserver_is_kept(self) -> None:
-        def resolve(name: str, rdtype: str) -> MagicMock:
-            if rdtype == "NS":
-                return _answer(_ns("v6.example.net."))
-            if rdtype == "A":
-                raise dns.resolver.NoAnswer()
-            return _answer(_rdata("2001:db8::1"))
-
-        with patch("dns.resolver.Resolver") as resolver:
-            resolver.return_value.resolve = resolve
-            assert zone_nameservers("example.com") == {"v6.example.net.": ["2001:db8::1"]}
+        assert "AAAA" not in asked  # an IPv4-only host cannot use an IPv6 address
 
     def test_a_failed_address_lookup_is_not_an_absent_address(self) -> None:
         def resolve(name: str, rdtype: str) -> MagicMock:
             if rdtype == "NS":
                 return _answer(_ns("ns1.example.net."))
-            if rdtype == "AAAA":
-                raise dns.resolver.LifetimeTimeout()
-            return _answer(_rdata("1.1.1.1"))
+            raise dns.resolver.LifetimeTimeout()
 
         with patch("dns.resolver.Resolver") as resolver:
             resolver.return_value.resolve = resolve
@@ -77,13 +64,15 @@ class TestZoneNameservers:
             resolver.return_value.resolve.side_effect = dns.resolver.NXDOMAIN()
             assert zone_nameservers("example.com") == {}
 
-    def test_unresolvable_nameserver_is_kept_with_no_address(self) -> None:
+    def test_resolver_without_configuration_returns_nothing(self) -> None:
+        with patch("dns.resolver.Resolver", side_effect=dns.resolver.NoResolverConfiguration()):
+            assert zone_nameservers("example.com") == {}
+
+    def test_nameserver_without_an_ipv4_address_is_kept_with_none(self) -> None:
         def resolve(name: str, rdtype: str) -> MagicMock:
             if rdtype == "NS":
                 return _answer(_ns("bad.example.net."), _ns("ns2.example.net."))
             if name == "bad.example.net.":
-                raise dns.resolver.NXDOMAIN()
-            if rdtype == "AAAA":
                 raise dns.resolver.NoAnswer()
             return _answer(_rdata("2.2.2.2"))
 
@@ -95,60 +84,30 @@ class TestZoneNameservers:
             }
 
 
-def _no_nameservers(error: object, response: object = None) -> dns.resolver.NoNameservers:
-    """What dnspython raises when its one server failed: the error and the response, if any."""
-    return dns.resolver.NoNameservers(
-        request=MagicMock(), errors=[("2001:db8::1", False, 53, error, response)]
-    )
-
-
 class TestAnswers:
-    @pytest.mark.parametrize(
-        "error",
-        [
-            OSError(101, "Network is unreachable"),
-            ConnectionRefusedError(),
-            dns.exception.Timeout(),
-        ],
-    )
-    def test_a_socket_error_or_timeout_is_unreachable(self, error: Exception) -> None:
-        with patch("dns.resolver.Resolver") as resolver:
-            resolver.return_value.resolve.side_effect = _no_nameservers(error)
-            with pytest.raises(verify.UnreachableError):
-                verify._answers("2001:db8::1", "a.example.com", 1.0)
+    def _resolver_returning(self, resolver: MagicMock, addresses: list[str], flags: int) -> None:
+        answer = _answer(*(_rdata(a) for a in addresses))
+        answer.response.flags = flags
+        resolver.return_value.resolve.return_value = answer
 
-    @pytest.mark.parametrize(
-        ("error", "response"),
-        [
-            ("SERVFAIL", MagicMock()),  # answered with a failure
-            (dns.message.ShortHeader(), None),  # a malformed reply carries no response
-            (dns.message.Truncated(), None),
-            (EOFError(), None),  # the connection closed mid-reply
-        ],
-    )
-    def test_anything_but_a_transport_error_is_not_unreachable(
-        self, error: object, response: object
-    ) -> None:
+    def test_the_a_records_of_a_complete_answer(self) -> None:
         with patch("dns.resolver.Resolver") as resolver:
-            resolver.return_value.resolve.side_effect = _no_nameservers(error, response)
-            with pytest.raises(dns.resolver.NoNameservers):
-                verify._answers("2001:db8::1", "a.example.com", 1.0)
+            self._resolver_returning(resolver, ["10.0.0.1"], 0)
+            assert verify._answers("1.1.1.1", "a.example.com", 1.0) == {"10.0.0.1"}
+
+    def test_a_truncated_answer_is_a_failure_even_when_the_records_match(self) -> None:
+        with patch("dns.resolver.Resolver") as resolver:
+            self._resolver_returning(resolver, ["10.0.0.1"], int(dns.flags.TC))
+            with pytest.raises(ValueError, match="truncated"):
+                verify._answers("1.1.1.1", "a.example.com", 1.0)
+
+    def test_no_answer_is_an_empty_set(self) -> None:
+        with patch("dns.resolver.Resolver") as resolver:
+            resolver.return_value.resolve.side_effect = dns.resolver.NoAnswer()
+            assert verify._answers("1.1.1.1", "a.example.com", 1.0) == set()
 
 
 class TestVerifyARecords:
-    def test_a_servfail_from_one_address_fails_even_when_another_answers(self) -> None:
-        def answers(ns: str, fqdn: str, timeout: float) -> set[str]:
-            if ":" in ns:
-                raise _no_nameservers("SERVFAIL", MagicMock())
-            return {"10.0.0.1"}
-
-        servers = {"ns1.": ["1.1.1.1", "2001:db8::1"]}
-        with (
-            patch.object(verify, "zone_nameservers", return_value=servers),
-            patch.object(verify, "_answers", side_effect=answers),
-        ):
-            assert verify_a_records("test", "example.com", {"10.0.0.1"}) is False
-
     def test_all_nameservers_match(self) -> None:
         servers = {"ns1.": ["1.1.1.1"], "ns2.": ["2.2.2.2"]}
         with (
@@ -183,57 +142,45 @@ class TestVerifyARecords:
             assert verify_a_records("test", "example.com", {"10.0.0.1"}) is False
 
     def test_every_address_of_a_nameserver_is_checked(self) -> None:
-        answers = {"2.2.2.2": {"10.0.0.1"}, "2001:db8::2": {"10.0.0.9"}}
-        servers = {"ns2.": ["2.2.2.2", "2001:db8::2"]}
+        answers = {"2.2.2.2": {"10.0.0.1"}, "3.3.3.3": {"10.0.0.9"}}
+        servers = {"ns2.": ["2.2.2.2", "3.3.3.3"]}
         with (
             patch.object(verify, "zone_nameservers", return_value=servers),
             patch.object(verify, "_answers", side_effect=lambda ns, f, t: answers[ns]),
         ):
             assert verify_a_records("test", "example.com", {"10.0.0.1"}) is False
 
-    def test_an_unreachable_address_is_no_verdict_when_another_answers(self) -> None:
-        """An IPv4-only host cannot reach a nameserver's IPv6 address."""
+    @pytest.mark.parametrize(
+        "error",
+        [
+            TimeoutError("slow"),
+            OSError("Network is unreachable"),
+            dns.resolver.LifetimeTimeout(),  # what a discarded malformed reply ends as
+            dns.resolver.NoNameservers(request=MagicMock(), errors=[]),
+            ValueError("the answer is truncated"),
+        ],
+    )
+    def test_any_error_from_any_address_fails(self, error: Exception) -> None:
+        answers = {"1.1.1.1": {"10.0.0.1"}}
 
-        def answers(ns: str, fqdn: str, timeout: float) -> set[str]:
-            if ":" in ns:
-                raise OSError("Network is unreachable")
-            return {"10.0.0.1"}
+        def answer(ns: str, fqdn: str, timeout: float) -> set[str]:
+            if ns == "2.2.2.2":
+                raise error
+            return answers[ns]
 
-        servers = {"ns1.": ["1.1.1.1", "2001:db8::1"]}
+        servers = {"ns1.": ["1.1.1.1", "2.2.2.2"]}
         with (
             patch.object(verify, "zone_nameservers", return_value=servers),
-            patch.object(verify, "_answers", side_effect=answers),
-        ):
-            assert verify_a_records("test", "example.com", {"10.0.0.1"}) is True
-
-    def test_a_nameserver_none_of_whose_addresses_answers_fails(self) -> None:
-        servers = {"ns1.": ["2001:db8::1"], "ns2.": ["2.2.2.2"]}
-        with (
-            patch.object(verify, "zone_nameservers", return_value=servers),
-            patch.object(
-                verify,
-                "_answers",
-                side_effect=lambda ns, f, t: (
-                    (_ for _ in ()).throw(OSError("unreachable")) if ":" in ns else {"10.0.0.1"}
-                ),
-            ),
-        ):
-            assert verify_a_records("test", "example.com", {"10.0.0.1"}) is False
-
-    def test_resolver_without_configuration_fails_instead_of_raising(self) -> None:
-        with patch("dns.resolver.Resolver", side_effect=dns.resolver.NoResolverConfiguration()):
-            assert verify.zone_nameservers("example.com") == {}
-            assert verify_a_records("test", "example.com", {"10.0.0.1"}) is False
-
-    def test_nameserver_error_fails(self) -> None:
-        with (
-            patch.object(verify, "zone_nameservers", return_value={"ns1.": ["1.1.1.1"]}),
-            patch.object(verify, "_answers", side_effect=TimeoutError("slow")),
+            patch.object(verify, "_answers", side_effect=answer),
         ):
             assert verify_a_records("test", "example.com", {"10.0.0.1"}) is False
 
     def test_no_nameservers_fails(self) -> None:
         with patch.object(verify, "zone_nameservers", return_value={}):
+            assert verify_a_records("test", "example.com", {"10.0.0.1"}) is False
+
+    def test_resolver_without_configuration_fails_instead_of_raising(self) -> None:
+        with patch("dns.resolver.Resolver", side_effect=dns.resolver.NoResolverConfiguration()):
             assert verify_a_records("test", "example.com", {"10.0.0.1"}) is False
 
     def test_queries_the_full_name(self) -> None:

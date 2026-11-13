@@ -14,9 +14,21 @@ spec:
       labels:
         app: wan-dns-sync
     spec:
+      automountServiceAccountToken: false  # set true when `kubernetes.enabled` needs the API
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: wan-dns-sync
-          image: wan-dns-sync:latest
+          image: ghcr.io/ginsys/wan-dns-sync:1.0.0
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
           args:
             - --config
             - /etc/wan-dns-sync/config.yaml

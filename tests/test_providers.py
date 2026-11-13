@@ -48,9 +48,7 @@ class FakeDesec:
         if method.upper() == "PATCH":
             return FakeResponse(200, [])
         if method.upper() == "POST":
-            return FakeResponse(
-                201, {"keys": [{"dnskey": "k", "ds": ["d"]}], "name": data["name"]}
-            )
+            return FakeResponse(201, {"keys": [{"dnskey": "k", "ds": ["d"]}], "name": data["name"]})
         raise AssertionError(f"unexpected call {method} {url}")
 
     def writes(self) -> list[tuple[str, str, Any]]:
@@ -102,6 +100,21 @@ class TestDesec:
                 _rrset("office", "TXT", ['"keep"']),
                 _rrset("www", "A", ["8.8.8.8"]),
                 _rrset("", "NS", ["ns1.desec.io.", "ns2.desec.org."]),
+            ]
+        }
+
+        sync_zone(_desec_provider(), ZONE, {"office": ["1.2.3.4"]}, 3600, dry_run=False)
+
+        (patch,) = desec.writes()
+        assert patch[2] == [_rrset("office", "A", ["1.2.3.4"])]
+
+    def test_an_unrelated_record_the_provider_cannot_parse_does_not_block_updates(
+        self, desec: FakeDesec
+    ) -> None:
+        desec.domains = {
+            ZONE: [
+                _rrset("office", "A", ["9.9.9.9"]),
+                _rrset("www", "HTTPS", ["1 . alpn=h2 no-default-alpn"]),
             ]
         }
 

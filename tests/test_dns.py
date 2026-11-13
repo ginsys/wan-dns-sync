@@ -57,7 +57,7 @@ class AddsUnownedRecord(FakeProvider):
     """A provider whose plan holds a change to a record this tool does not own."""
 
     def _process_desired_zone(self, desired: Any) -> Any:
-        extra = Record.new(desired, "extra", {"type": "TXT", "ttl": 300, "values": ["x"]})
+        extra = Record.new(desired, "extra", {"type": "A", "ttl": 300, "values": ["9.9.9.9"]})
         desired.add_record(extra, lenient=True)
         return super()._process_desired_zone(desired)
 

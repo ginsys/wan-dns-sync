@@ -68,21 +68,28 @@ def update_apex_dns_annotations(
     except config.ConfigException as e:
         raise KubernetesUpdateError("no in-cluster kubernetes config") from e
 
-    # Update Ingresses
-    updated |= _update_ingresses(
-        networking_v1_api=client.NetworkingV1Api(),
-        label_selector=label_selector,
-        target_value=target_value,
-        dry_run=dry_run,
-    )
-
-    # Update HTTPRoutes
-    updated |= _update_httproutes(
-        custom_api=client.CustomObjectsApi(),
-        label_selector=label_selector,
-        target_value=target_value,
-        dry_run=dry_run,
-    )
+    # Both kinds are always attempted: a failure on one must not leave the other stale.
+    errors: list[str] = []
+    try:
+        updated |= _update_ingresses(
+            networking_v1_api=client.NetworkingV1Api(),
+            label_selector=label_selector,
+            target_value=target_value,
+            dry_run=dry_run,
+        )
+    except KubernetesUpdateError as e:
+        errors.append(str(e))
+    try:
+        updated |= _update_httproutes(
+            custom_api=client.CustomObjectsApi(),
+            label_selector=label_selector,
+            target_value=target_value,
+            dry_run=dry_run,
+        )
+    except KubernetesUpdateError as e:
+        errors.append(str(e))
+    if errors:
+        raise KubernetesUpdateError("; ".join(errors))
 
     return updated
 

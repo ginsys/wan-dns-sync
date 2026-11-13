@@ -95,6 +95,9 @@ def sync_zone(
     if zone_fqdn.rstrip(".") not in available:
         raise DNSError(f"zone {zone} does not exist at provider {provider.id}")
     _forbid_zone_creation(provider)
+    # Only A records are owned, so only they are read: a provider cannot then fail to parse
+    # an unrelated record (a deSEC HTTPS record with valid RFC 9460 syntax does).
+    provider.SUPPORTS = {"A"}
 
     desired = Zone(zone_fqdn, [])
     for name, addresses in owned.items():

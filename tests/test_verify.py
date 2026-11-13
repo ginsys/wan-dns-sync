@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import dns.resolver
+import pytest
 
 from wan_dns_sync import verify
 from wan_dns_sync.verify import verify_a_records, zone_nameservers
@@ -92,7 +93,41 @@ class TestZoneNameservers:
             }
 
 
+def _no_nameservers(response: object) -> dns.resolver.NoNameservers:
+    """What dnspython raises when its one server failed: errors carry the response, if any."""
+    return dns.resolver.NoNameservers(
+        request=MagicMock(), errors=[("2001:db8::1", False, 53, "failed", response)]
+    )
+
+
+class TestAnswers:
+    def test_an_unreachable_server_is_unreachable(self) -> None:
+        with patch("dns.resolver.Resolver") as resolver:
+            resolver.return_value.resolve.side_effect = _no_nameservers(None)
+            with pytest.raises(verify.UnreachableError):
+                verify._answers("2001:db8::1", "a.example.com", 1.0)
+
+    def test_a_server_that_answered_with_a_failure_is_not_unreachable(self) -> None:
+        with patch("dns.resolver.Resolver") as resolver:
+            resolver.return_value.resolve.side_effect = _no_nameservers(MagicMock())
+            with pytest.raises(dns.resolver.NoNameservers):
+                verify._answers("2001:db8::1", "a.example.com", 1.0)
+
+
 class TestVerifyARecords:
+    def test_a_servfail_from_one_address_fails_even_when_another_answers(self) -> None:
+        def answers(ns: str, fqdn: str, timeout: float) -> set[str]:
+            if ":" in ns:
+                raise _no_nameservers(MagicMock())
+            return {"10.0.0.1"}
+
+        servers = {"ns1.": ["1.1.1.1", "2001:db8::1"]}
+        with (
+            patch.object(verify, "zone_nameservers", return_value=servers),
+            patch.object(verify, "_answers", side_effect=answers),
+        ):
+            assert verify_a_records("test", "example.com", {"10.0.0.1"}) is False
+
     def test_all_nameservers_match(self) -> None:
         servers = {"ns1.": ["1.1.1.1"], "ns2.": ["2.2.2.2"]}
         with (

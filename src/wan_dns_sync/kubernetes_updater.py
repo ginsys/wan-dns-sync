@@ -77,8 +77,8 @@ def update_apex_dns_annotations(
             target_value=target_value,
             dry_run=dry_run,
         )
-    except KubernetesUpdateError as e:
-        errors.append(str(e))
+    except Exception as e:  # a transport error (timeout, refused) is not an ApiException
+        errors.append(_describe(e, "ingresses"))
     try:
         updated |= _update_httproutes(
             custom_api=client.CustomObjectsApi(),
@@ -86,12 +86,19 @@ def update_apex_dns_annotations(
             target_value=target_value,
             dry_run=dry_run,
         )
-    except KubernetesUpdateError as e:
-        errors.append(str(e))
+    except Exception as e:
+        errors.append(_describe(e, "httproutes"))
     if errors:
         raise KubernetesUpdateError("; ".join(errors))
 
     return updated
+
+
+def _describe(error: Exception, kind: str) -> str:
+    """Our own errors say what failed; anything else is named by type only."""
+    if isinstance(error, KubernetesUpdateError):
+        return str(error)
+    return f"{type(error).__name__} while updating {kind}"
 
 
 def _current_annotations(annotations: dict[str, str]) -> dict[str, str | None]:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dns.exception
 import dns.resolver
 import structlog
 
@@ -57,6 +58,16 @@ def _answers(ns_ip: str, fqdn: str, timeout: float) -> set[str]:
         return {rdata.address for rdata in resolver.resolve(fqdn, "A")}
     except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
         return set()
+    except dns.resolver.NoNameservers as e:
+        # dnspython raises this both for a server it could not talk to and for one that
+        # answered SERVFAIL or REFUSED. Only the first is "unreachable".
+        if any(error[4] is not None for error in e.kwargs["errors"]):
+            raise
+        raise UnreachableError(str(e)) from e
+
+
+class UnreachableError(Exception):
+    """No answer could be obtained from an address: no route, refused connection, timeout."""
 
 
 def verify_a_records(
@@ -84,10 +95,15 @@ def verify_a_records(
         for ns_ip in ns_ips:
             try:
                 actual = _answers(ns_ip, fqdn, timeout)
-            except Exception as e:
+            except (UnreachableError, OSError, dns.exception.Timeout) as e:
                 # An address this host cannot reach (an IPv6 one without a route) is no
                 # verdict on the nameserver; it fails only when none of its addresses answers.
                 logger.warning("DNS verification error", nameserver=ns_ip, fqdn=fqdn, error=str(e))
+                continue
+            except Exception as e:  # the server answered, with a failure
+                logger.warning("DNS verification failed", nameserver=ns_ip, fqdn=fqdn, error=str(e))
+                ok = False
+                answered = True  # it did answer: no second "no address answered" report
                 continue
             answered = True
             checked += 1

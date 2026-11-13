@@ -54,7 +54,7 @@ def update_apex_dns_annotations(
 
     try:
         # Load in-cluster config
-        config.load_incluster_config()  # type: ignore[no-untyped-call]
+        config.load_incluster_config()  # type: ignore[no-untyped-call,unused-ignore]
     except config.ConfigException:
         logger.error("Failed to load in-cluster kubernetes config")
         return False

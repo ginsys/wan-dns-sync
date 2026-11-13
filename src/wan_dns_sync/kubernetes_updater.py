@@ -94,6 +94,11 @@ def update_apex_dns_annotations(
     return updated
 
 
+def _api_error(error: ApiException) -> str:
+    """Status and reason only: str(ApiException) carries the response headers and body."""
+    return f"HTTP {error.status} {error.reason}"
+
+
 def _describe(error: Exception, kind: str) -> str:
     """Our own errors say what failed; anything else is named by type only."""
     if isinstance(error, KubernetesUpdateError):
@@ -140,7 +145,7 @@ def _update_ingresses(
             label_selector=label_selector, _request_timeout=REQUEST_TIMEOUT
         )
     except ApiException as e:
-        raise KubernetesUpdateError(f"listing ingresses: {e}") from e
+        raise KubernetesUpdateError(f"listing ingresses: {_api_error(e)}") from e
 
     for ing in ingresses.items:
         meta = ing.metadata
@@ -184,7 +189,7 @@ def _update_ingresses(
                     "Failed to patch ingress",
                     namespace=namespace,
                     name=name,
-                    error=str(e),
+                    error=_api_error(e),
                 )
         else:
             updated = True
@@ -216,7 +221,7 @@ def _update_httproutes(
             ),
         )
     except ApiException as e:
-        raise KubernetesUpdateError(f"listing httproutes: {e}") from e
+        raise KubernetesUpdateError(f"listing httproutes: {_api_error(e)}") from e
 
     for route in httproutes.get("items", []):
         namespace = route["metadata"]["namespace"]
@@ -260,7 +265,7 @@ def _update_httproutes(
                     "Failed to patch httproute",
                     namespace=namespace,
                     name=name,
-                    error=str(e),
+                    error=_api_error(e),
                 )
         else:
             updated = True

@@ -49,6 +49,9 @@ def zone_nameservers(zone: str, timeout: float = 5.0) -> dict[str, list[str] | N
     return servers
 
 
+_TRANSPORT_ERRORS = (OSError, dns.exception.Timeout)
+
+
 def _answers(ns_ip: str, fqdn: str, timeout: float) -> set[str]:
     """The A records one nameserver returns for ``fqdn`` (empty on NXDOMAIN or no answer)."""
     resolver = dns.resolver.Resolver(configure=False)
@@ -59,11 +62,13 @@ def _answers(ns_ip: str, fqdn: str, timeout: float) -> set[str]:
     except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
         return set()
     except dns.resolver.NoNameservers as e:
-        # dnspython raises this both for a server it could not talk to and for one that
-        # answered SERVFAIL or REFUSED. Only the first is "unreachable".
-        if any(error[4] is not None for error in e.kwargs["errors"]):
-            raise
-        raise UnreachableError(str(e)) from e
+        # dnspython raises this for a server it could not talk to, for one that answered
+        # SERVFAIL or REFUSED, and for a malformed or truncated reply. Only a socket
+        # error or a timeout is "unreachable"; anything unrecognised is a failure.
+        errors = e.kwargs["errors"]
+        if errors and all(isinstance(error[3], _TRANSPORT_ERRORS) for error in errors):
+            raise UnreachableError(str(e)) from e
+        raise
 
 
 class UnreachableError(Exception):

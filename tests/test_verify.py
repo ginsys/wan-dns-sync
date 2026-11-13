@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import socket
+import threading
 from unittest.mock import MagicMock, patch
 
 import dns.flags
+import dns.message
 import dns.resolver
+import dns.rrset
 import pytest
 
 from wan_dns_sync import verify
@@ -210,3 +214,96 @@ class TestVerifyARecords:
         ):
             verify_a_records("test", "example.com", {"10.0.0.1"})
         assert answers.call_args.args[1] == "test.example.com"
+
+
+class _LoopbackDNS:
+    """A nameserver on 127.0.0.1 answering UDP with TC=1 and TCP with the full answer.
+
+    The mocked-resolver tests above cannot show how dnspython recovers from a
+    truncated UDP reply; this one sends real packets.
+    """
+
+    def __init__(self, tcp_flags: int) -> None:
+        self.tcp_flags = tcp_flags
+        for _ in range(20):  # UDP and TCP must share one port number
+            self.udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.udp.bind(("127.0.0.1", 0))
+            self.port = self.udp.getsockname()[1]
+            self.tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                self.tcp.bind(("127.0.0.1", self.port))
+                break
+            except OSError:
+                self.udp.close()
+                self.tcp.close()
+        self.tcp.listen(1)
+        self.udp.settimeout(5)
+        self.tcp.settimeout(5)
+        self.threads = [
+            threading.Thread(target=self._serve_udp, daemon=True),
+            threading.Thread(target=self._serve_tcp, daemon=True),
+        ]
+
+    @staticmethod
+    def _reply(wire: bytes, flags: int, with_answer: bool) -> dns.message.Message:
+        query = dns.message.from_wire(wire)
+        response = dns.message.make_response(query)
+        response.flags |= flags
+        if with_answer:
+            name = query.question[0].name
+            response.answer.append(dns.rrset.from_text(name, 60, "IN", "A", "10.0.0.1"))
+        return response
+
+    def _serve_udp(self) -> None:
+        try:
+            wire, addr = self.udp.recvfrom(512)
+            self.udp.sendto(self._reply(wire, dns.flags.TC, False).to_wire(), addr)
+        except OSError:
+            pass
+
+    def _serve_tcp(self) -> None:
+        try:
+            conn, _ = self.tcp.accept()
+            with conn:
+                length = int.from_bytes(conn.recv(2), "big")
+                wire = conn.recv(length)
+                data = self._reply(wire, self.tcp_flags, True).to_wire()
+                conn.sendall(len(data).to_bytes(2, "big") + data)
+        except OSError:
+            pass
+
+    def __enter__(self) -> _LoopbackDNS:
+        for thread in self.threads:
+            thread.start()
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.udp.close()
+        self.tcp.close()
+
+
+def _resolver_on(port: int) -> type[dns.resolver.Resolver]:
+    class _Resolver(dns.resolver.Resolver):
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            super().__init__(*args, **kwargs)  # type: ignore[arg-type]
+            self.port = port
+
+    return _Resolver
+
+
+class TestTruncationOverTheWire:
+    def test_a_truncated_udp_answer_completed_over_tcp_is_accepted(self) -> None:
+        """Retrying over TCP is how a truncated answer is meant to recover."""
+        with (
+            _LoopbackDNS(tcp_flags=0) as server,
+            patch("dns.resolver.Resolver", _resolver_on(server.port)),
+        ):
+            assert verify._answers("127.0.0.1", "a.example.com", 3.0) == {"10.0.0.1"}
+
+    def test_a_tcp_answer_that_is_still_truncated_fails(self) -> None:
+        with (
+            _LoopbackDNS(tcp_flags=int(dns.flags.TC)) as server,
+            patch("dns.resolver.Resolver", _resolver_on(server.port)),
+            pytest.raises(ValueError, match="truncated"),
+        ):
+            verify._answers("127.0.0.1", "a.example.com", 3.0)

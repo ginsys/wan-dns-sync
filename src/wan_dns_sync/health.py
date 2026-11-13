@@ -18,11 +18,11 @@ logger = structlog.get_logger()
 class HealthState:
     """What the update loop last did, readable from the HTTP thread."""
 
-    def __init__(self, interval: int) -> None:
+    def __init__(self, interval: int, verify_delay: float = 0) -> None:
         self._lock = threading.Lock()
-        # A cycle can legitimately run long (provider retries), so the loop may
-        # go quiet for a while before liveness fails.
-        self.stale_after = 3 * interval + 120
+        # A cycle can legitimately run long (provider retries, the wait before
+        # verification), so the loop may go quiet for a while before liveness fails.
+        self.stale_after = 3 * interval + 120 + verify_delay
         self._heartbeat = time.monotonic()
         self._last_cycle_ok: bool | None = None
         self._last_cycle_at: float | None = None

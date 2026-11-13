@@ -106,7 +106,8 @@ class SettingsConfig(_Strict):
     )
     dry_run: bool = Field(default=False, description="Plan changes but do not apply them")
     health_port: int | None = Field(default=None, description="HTTP health endpoint port")
-    verify_delay: float = Field(default=2.0, ge=0, description="Seconds before DNS verification")
+    # deSEC's two nameservers measured about 105 s to agree after a write.
+    verify_delay: float = Field(default=120.0, ge=0, description="Seconds before DNS verification")
     allow_private_ips: bool = Field(
         default=False, description="Publish addresses that are not globally routable"
     )

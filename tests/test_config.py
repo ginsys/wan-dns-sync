@@ -101,6 +101,7 @@ class TestLoadConfig:
         assert config.settings.dry_run is False
         assert config.settings.health_port is None
         assert config.settings.allow_private_ips is False
+        assert config.settings.verify_delay == 120  # deSEC's nameservers need about 105 s
         assert config.opnsense.verify_ssl is True
         assert config.kubernetes.enabled is False
 

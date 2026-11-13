@@ -263,7 +263,7 @@ def main() -> None:
     )
 
     shutdown = GracefulShutdown()
-    health = HealthState(config.settings.interval)
+    health = HealthState(config.settings.interval, config.settings.verify_delay)
     health_server: HTTPServer | None = None
     exit_code = 0
 

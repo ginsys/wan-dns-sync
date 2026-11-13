@@ -55,6 +55,7 @@ opnsense:
     wan2: "vlan0.2"
 
 providers:                          # octoDNS provider classes; keys besides `class` go to the provider
+  # Every ${VAR} must be set even for a provider no zone uses, so list only the ones you run.
   desec:
     class: octodns_desec.DesecProvider
     token: "${DESEC_TOKEN}"
@@ -78,7 +79,7 @@ settings:
   reconcile_interval: 3600          # seconds between full zone reads while nothing changes
   dry_run: false
   health_port: 8080                 # null disables the health server
-  verify_delay: 2.0                 # seconds before verifying a change
+  verify_delay: 120                 # seconds before verifying a change (deSEC needs ~2 min)
   allow_private_ips: false
 
 kubernetes:                         # optional

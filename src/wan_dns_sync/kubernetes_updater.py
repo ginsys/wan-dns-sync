@@ -222,6 +222,9 @@ def _update_httproutes(
             ),
         )
     except ApiException as e:
+        if e.status == 404:  # no Gateway API CRD: an Ingress-only cluster has nothing to do here
+            logger.info("HTTPRoute API not available, skipping httproutes")
+            return False
         raise KubernetesUpdateError(f"listing httproutes: {_api_error(e)}") from e
 
     for route in httproutes.get("items", []):

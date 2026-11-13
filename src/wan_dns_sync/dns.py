@@ -25,6 +25,10 @@ class DNSError(Exception):
     """A zone could not be synced safely."""
 
 
+class WriteUncertainError(DNSError):
+    """``provider.apply`` raised, so the write may or may not have reached the zone."""
+
+
 def load_provider(name: str, args: dict[str, Any]) -> BaseProvider:
     """Instantiate the octoDNS provider named by ``args['class']``."""
     kwargs = dict(args)
@@ -123,5 +127,8 @@ def sync_zone(
     # deSEC derives "exists" from having read a record and would create an
     # existing-but-empty zone; the list_zones check above is the real guard.
     plan.exists = True
-    provider.apply(plan)
+    try:
+        provider.apply(plan)
+    except Exception as e:
+        raise WriteUncertainError(f"applying {zone} at {provider.id} failed: {e}") from e
     return True

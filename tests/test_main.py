@@ -217,6 +217,42 @@ def test_a_write_whose_response_was_lost_is_verified_on_the_retry() -> None:
     assert {v[0] for v in h.verified} == {"test", "multi"}
 
 
+def test_a_failure_before_any_write_leaves_nothing_pending() -> None:
+    h = Harness()
+    assert h.updater.run_cycle() is True  # 1.2.3.4 published and verified
+
+    h.ips = {"wan1": "9.9.9.9", "wan2": "5.6.7.8"}
+    healthy = h.updater._load_provider
+    h.updater._load_provider = lambda name, args: (_ for _ in ()).throw(RuntimeError("no token"))
+    h.now = 60
+    assert h.updater.run_cycle() is False  # the provider could not even be loaded
+    assert h.updater._unverified == {}
+
+    h.updater._load_provider = healthy
+    h.ips = IPS  # back to what is published: nothing to write, nothing to wait for
+    h.now = 120
+    assert h.updater.run_cycle() is True
+
+
+def test_an_uncertain_write_that_never_landed_is_not_waited_for() -> None:
+    h = Harness()
+    # the nameservers serve exactly what the provider holds
+    h.updater._verify = lambda name, zone, ips: ips == set(h.stored[(name, "A")]["values"])
+    assert h.updater.run_cycle() is True  # 1.2.3.4 published and verified
+
+    h.ips = {"wan1": "9.9.9.9", "wan2": "5.6.7.8"}
+    h.provider.fail_apply = RuntimeError("503 before the write")
+    h.now = 60
+    assert h.updater.run_cycle() is False
+    assert h.updater._unverified  # it may have landed, so it is checked
+
+    h.provider.fail_apply = None
+    h.ips = IPS  # the provider still holds 1.2.3.4, which is what is wanted again
+    h.now = 120
+    assert h.updater.run_cycle() is True  # the stale 9.9.9.9 expectation was dropped
+    assert h.updater._unverified == {}
+
+
 def test_each_syncing_cycle_builds_a_fresh_provider() -> None:
     """A provider instance caches a zone's records, so none may live across cycles."""
     h = Harness()

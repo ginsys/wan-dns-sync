@@ -187,7 +187,7 @@ def test_failed_verification_is_retried_until_it_passes() -> None:
     assert h.verified == []  # verified once, not again
 
 
-def test_pending_verification_survives_a_record_losing_its_interface() -> None:
+def test_pending_verification_checks_what_is_owned_now_when_a_record_loses_its_interface() -> None:
     h = Harness()
     h.verify_result = False
     h.updater.run_cycle()  # "test" and "multi" written, not verified
@@ -198,8 +198,8 @@ def test_pending_verification_survives_a_record_losing_its_interface() -> None:
     h.verified.clear()
     assert h.updater.run_cycle() is True
 
-    assert ("test", ZONE, {"1.2.3.4"}) in h.verified  # still checked, against what was written
-    assert h.updater._unverified == {}  # checked only until it passed
+    assert h.verified == [("multi", ZONE, {"5.6.7.8"})]  # "test" is neither published nor checked
+    assert h.updater._unverified == set()  # checked only until it passed
 
 
 def test_a_write_whose_response_was_lost_is_verified_on_the_retry() -> None:
@@ -224,14 +224,17 @@ def test_a_failure_before_any_write_leaves_nothing_pending() -> None:
     h.ips = {"wan1": "9.9.9.9", "wan2": "5.6.7.8"}
     healthy = h.updater._load_provider
     h.updater._load_provider = lambda name, args: (_ for _ in ()).throw(RuntimeError("no token"))
+    h.verified.clear()
     h.now = 60
     assert h.updater.run_cycle() is False  # the provider could not even be loaded
-    assert h.updater._unverified == {}
+    assert h.updater._unverified == set()
+    assert h.verified == []  # nothing was written, so nothing was checked
 
     h.updater._load_provider = healthy
     h.ips = IPS  # back to what is published: nothing to write, nothing to wait for
     h.now = 120
     assert h.updater.run_cycle() is True
+    assert h.verified == []
 
 
 def test_an_uncertain_write_that_never_landed_is_not_waited_for() -> None:
@@ -249,8 +252,26 @@ def test_an_uncertain_write_that_never_landed_is_not_waited_for() -> None:
     h.provider.fail_apply = None
     h.ips = IPS  # the provider still holds 1.2.3.4, which is what is wanted again
     h.now = 120
-    assert h.updater.run_cycle() is True  # the stale 9.9.9.9 expectation was dropped
-    assert h.updater._unverified == {}
+    assert h.updater.run_cycle() is True  # what is owned now is checked, not the lost 9.9.9.9
+    assert h.updater._unverified == set()
+
+
+def test_an_uncertain_write_followed_by_interface_loss_does_not_stick() -> None:
+    h = Harness()
+    h.updater._verify = lambda name, zone, ips: ips == set(h.stored[(name, "A")]["values"])
+    assert h.updater.run_cycle() is True  # 1.2.3.4 published and verified
+
+    h.ips = {"wan1": "9.9.9.9", "wan2": "5.6.7.8"}
+    h.provider.fail_apply = RuntimeError("503 before the write")
+    h.now = 60
+    assert h.updater.run_cycle() is False
+
+    h.provider.fail_apply = None
+    h.ips = {"wan2": "5.6.7.8"}  # wan1 is gone: "test" has no address and is left alone
+    for minute in (2, 3, 4):
+        h.now = minute * 60
+        assert h.updater.run_cycle() is True  # never waits for the 9.9.9.9 that was not written
+    assert h.stored[("test", "A")]["values"] == ["1.2.3.4"]
 
 
 def test_each_syncing_cycle_builds_a_fresh_provider() -> None:

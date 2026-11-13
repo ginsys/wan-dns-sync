@@ -325,6 +325,24 @@ def test_one_failing_provider_does_not_stop_the_other() -> None:
     assert good.zones[ZONE][("test", "A")]["values"] == ["1.2.3.4"]
 
 
+def test_several_changed_zones_share_one_wait_before_verification() -> None:
+    """Liveness allows one verify_delay per cycle, so N zones must not sleep N times."""
+    records = [{"name": "test", "interfaces": ["wan1"]}]
+    zones = {
+        name: {"providers": ["fake"], "records": records}
+        for name in (ZONE, "b.example.org", "c.example.net")
+    }
+    h = Harness(make_config(zones=zones))
+    h.provider.zones.update({"b.example.org": {}, "c.example.net": {}})
+    sleeps: list[float] = []
+    h.updater._sleep = sleeps.append
+
+    assert h.updater.run_cycle() is True
+
+    assert len(sleeps) == 1
+    assert {v[1] for v in h.verified} == set(zones)  # every zone is still verified
+
+
 def test_verification_mismatch_fails_the_cycle() -> None:
     h = Harness()
     h.verify_result = False

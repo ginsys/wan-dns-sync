@@ -155,6 +155,7 @@ class Updater:
         logger = structlog.get_logger()
         ok = True
         any_changes = False
+        wrote = False
         for zone, owned in desired.items():
             zone_config = self.config.zones[zone]
             written = False  # a write was made, or may have been (an apply that raised)
@@ -176,21 +177,23 @@ class Updater:
                         error_type=type(e).__name__,
                         error=str(e),
                     )
-            if self.dry_run:
-                continue
-            if written:
+            if written and not self.dry_run:
                 # The retry of a write finds no change to apply, and must not read that
                 # as a verified zone: keep the zone marked until a check passes.
                 self._unverified.add(zone)
-                self._sleep(self.config.settings.verify_delay)
-            if zone in self._unverified:
-                # Always check what is owned now, never what an earlier cycle wrote: a
-                # record that has lost its addresses is neither published nor checked.
-                results = [self._verify(n, zone, set(a)) for n, a in owned.items()]
-                if all(results):
-                    self._unverified.discard(zone)
-                else:
-                    ok = False
+                wrote = True
+        if wrote:
+            # One wait for all zones written this cycle, so the loop's heartbeat allowance
+            # (one verify_delay) holds however many zones changed.
+            self._sleep(self.config.settings.verify_delay)
+        for zone in [z for z in desired if z in self._unverified and not self.dry_run]:
+            # Always check what is owned now, never what an earlier cycle wrote: a
+            # record that has lost its addresses is neither published nor checked.
+            results = [self._verify(n, zone, set(a)) for n, a in desired[zone].items()]
+            if all(results):
+                self._unverified.discard(zone)
+            else:
+                ok = False
         if not any_changes:
             logger.info("No DNS changes applied")
         return ok

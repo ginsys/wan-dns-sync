@@ -12,9 +12,10 @@ from wan_dns_sync import verify
 from wan_dns_sync.verify import verify_a_records, zone_nameservers
 
 
-def _answer(*items: object) -> MagicMock:
+def _answer(*items: object, flags: int = 0) -> MagicMock:
     answer = MagicMock()
     answer.__iter__ = lambda self: iter(items)
+    answer.response.flags = flags
     return answer
 
 
@@ -67,6 +68,25 @@ class TestZoneNameservers:
     def test_resolver_without_configuration_returns_nothing(self) -> None:
         with patch("dns.resolver.Resolver", side_effect=dns.resolver.NoResolverConfiguration()):
             assert zone_nameservers("example.com") == {}
+
+    def test_a_truncated_ns_answer_returns_nothing(self) -> None:
+        """A partial NS list would silently leave servers out of the verification."""
+        truncated = _answer(_ns("ns1.example.net."), flags=int(dns.flags.TC))
+        with patch("dns.resolver.Resolver") as resolver:
+            resolver.return_value.resolve.return_value = truncated
+            assert zone_nameservers("example.com") == {}
+
+    def test_a_truncated_address_answer_is_a_failed_lookup(self) -> None:
+        """A partial address list would silently leave addresses out of the verification."""
+
+        def resolve(name: str, rdtype: str) -> MagicMock:
+            if rdtype == "NS":
+                return _answer(_ns("ns1.example.net."))
+            return _answer(_rdata("1.1.1.1"), flags=int(dns.flags.TC))
+
+        with patch("dns.resolver.Resolver") as resolver:
+            resolver.return_value.resolve = resolve
+            assert zone_nameservers("example.com") == {"ns1.example.net.": None}
 
     def test_nameserver_without_an_ipv4_address_is_kept_with_none(self) -> None:
         def resolve(name: str, rdtype: str) -> MagicMock:

@@ -15,6 +15,13 @@ import structlog
 logger = structlog.get_logger()
 
 
+def _complete(answer: dns.resolver.Answer) -> dns.resolver.Answer:
+    """The answer, or ValueError when it is truncated: a partial list omits servers."""
+    if answer.response.flags & dns.flags.TC:
+        raise ValueError("the answer is truncated")
+    return answer
+
+
 def zone_nameservers(zone: str, timeout: float = 5.0) -> dict[str, list[str] | None]:
     """The zone's nameservers and their IPv4 addresses.
 
@@ -26,7 +33,7 @@ def zone_nameservers(zone: str, timeout: float = 5.0) -> dict[str, list[str] | N
     try:
         resolver = dns.resolver.Resolver()
         resolver.lifetime = timeout
-        names = [str(r.target) for r in resolver.resolve(zone, "NS")]
+        names = [str(r.target) for r in _complete(resolver.resolve(zone, "NS"))]
     except Exception as e:  # includes a resolver with no configuration
         logger.warning("Could not look up zone nameservers", zone=zone, error=str(e))
         return {}
@@ -34,7 +41,7 @@ def zone_nameservers(zone: str, timeout: float = 5.0) -> dict[str, list[str] | N
     servers: dict[str, list[str] | None] = {}
     for ns in names:
         try:
-            servers[ns] = [rdata.address for rdata in resolver.resolve(ns, "A")]
+            servers[ns] = [rdata.address for rdata in _complete(resolver.resolve(ns, "A"))]
         except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN):
             servers[ns] = []
         except Exception as e:
@@ -52,9 +59,7 @@ def _answers(ns_ip: str, fqdn: str, timeout: float) -> set[str]:
         answer = resolver.resolve(fqdn, "A")
     except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
         return set()
-    if answer.response.flags & dns.flags.TC:  # a truncated answer is not the whole answer
-        raise ValueError("the answer is truncated")
-    return {rdata.address for rdata in answer}
+    return {rdata.address for rdata in _complete(answer)}
 
 
 def verify_a_records(

@@ -135,6 +135,40 @@ class TestVerifyARecords:
         ):
             assert verify_a_records("test", "example.com", {"10.0.0.1"}) is False
 
+    def test_an_unreachable_address_is_no_verdict_when_another_answers(self) -> None:
+        """An IPv4-only host cannot reach a nameserver's IPv6 address."""
+
+        def answers(ns: str, fqdn: str, timeout: float) -> set[str]:
+            if ":" in ns:
+                raise OSError("Network is unreachable")
+            return {"10.0.0.1"}
+
+        servers = {"ns1.": ["1.1.1.1", "2001:db8::1"]}
+        with (
+            patch.object(verify, "zone_nameservers", return_value=servers),
+            patch.object(verify, "_answers", side_effect=answers),
+        ):
+            assert verify_a_records("test", "example.com", {"10.0.0.1"}) is True
+
+    def test_a_nameserver_none_of_whose_addresses_answers_fails(self) -> None:
+        servers = {"ns1.": ["2001:db8::1"], "ns2.": ["2.2.2.2"]}
+        with (
+            patch.object(verify, "zone_nameservers", return_value=servers),
+            patch.object(
+                verify,
+                "_answers",
+                side_effect=lambda ns, f, t: (
+                    (_ for _ in ()).throw(OSError("unreachable")) if ":" in ns else {"10.0.0.1"}
+                ),
+            ),
+        ):
+            assert verify_a_records("test", "example.com", {"10.0.0.1"}) is False
+
+    def test_resolver_without_configuration_fails_instead_of_raising(self) -> None:
+        with patch("dns.resolver.Resolver", side_effect=dns.resolver.NoResolverConfiguration()):
+            assert verify.zone_nameservers("example.com") == {}
+            assert verify_a_records("test", "example.com", {"10.0.0.1"}) is False
+
     def test_nameserver_error_fails(self) -> None:
         with (
             patch.object(verify, "zone_nameservers", return_value={"ns1.": ["1.1.1.1"]}),

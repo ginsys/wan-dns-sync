@@ -6,12 +6,15 @@ import json
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
 from kubernetes.client import ApiClient
+from kubernetes.client.exceptions import ApiException
 from structlog.testing import capture_logs
 
 from wan_dns_sync.kubernetes_updater import (
     STALE_ANNOTATION_KEYS,
     TARGET_ANNOTATION_KEY,
+    KubernetesUpdateError,
     _update_httproutes,
     _update_ingresses,
     update_apex_dns_annotations,
@@ -214,4 +217,25 @@ class TestUpdateApexDnsAnnotations:
             assert update_apex_dns_annotations(["5.6.7.8", "1.2.3.4"], SELECTOR) is True
 
         assert_patched(networking_api.patch_namespaced_ingress)
+        assert_patched(custom_api.patch_namespaced_custom_object)
+
+    def test_a_failing_ingress_does_not_stop_the_httproutes(self) -> None:
+        networking_api = make_networking_api(None)
+        networking_api.patch_namespaced_ingress.side_effect = ApiException(status=403)
+        custom_api = make_custom_api(None)
+
+        with (
+            patch("wan_dns_sync.kubernetes_updater.config.load_incluster_config"),
+            patch(
+                "wan_dns_sync.kubernetes_updater.client.NetworkingV1Api",
+                return_value=networking_api,
+            ),
+            patch(
+                "wan_dns_sync.kubernetes_updater.client.CustomObjectsApi",
+                return_value=custom_api,
+            ),
+            pytest.raises(KubernetesUpdateError, match="ingress"),
+        ):
+            update_apex_dns_annotations(["5.6.7.8", "1.2.3.4"], SELECTOR)
+
         assert_patched(custom_api.patch_namespaced_custom_object)

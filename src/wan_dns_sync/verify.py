@@ -17,12 +17,11 @@ def zone_nameservers(zone: str, timeout: float = 5.0) -> dict[str, list[str] | N
     record" (NoAnswer, NXDOMAIN) counts as the absence of an address family. An empty
     dict means the NS lookup itself failed.
     """
-    resolver = dns.resolver.Resolver()
-    resolver.lifetime = timeout
-
     try:
+        resolver = dns.resolver.Resolver()
+        resolver.lifetime = timeout
         names = [str(r.target) for r in resolver.resolve(zone, "NS")]
-    except Exception as e:
+    except Exception as e:  # includes a resolver with no configuration
         logger.warning("Could not look up zone nameservers", zone=zone, error=str(e))
         return {}
 
@@ -81,14 +80,17 @@ def verify_a_records(
             logger.warning("Nameserver has no address to verify against", nameserver=ns, zone=zone)
             ok = False
             continue
+        answered = False
         for ns_ip in ns_ips:
-            checked += 1
             try:
                 actual = _answers(ns_ip, fqdn, timeout)
             except Exception as e:
+                # An address this host cannot reach (an IPv6 one without a route) is no
+                # verdict on the nameserver; it fails only when none of its addresses answers.
                 logger.warning("DNS verification error", nameserver=ns_ip, fqdn=fqdn, error=str(e))
-                ok = False
                 continue
+            answered = True
+            checked += 1
             if actual != expected_ips:
                 logger.warning(
                     "DNS verification mismatch",
@@ -98,6 +100,9 @@ def verify_a_records(
                     actual=sorted(actual),
                 )
                 ok = False
+        if not answered:
+            logger.warning("No address of the nameserver answered", nameserver=ns, zone=zone)
+            ok = False
     if ok:
         logger.debug("DNS verification passed", fqdn=fqdn, addresses=checked)
     return ok

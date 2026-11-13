@@ -122,7 +122,19 @@ class TestOPNsenseClient:
 
     @pytest.mark.parametrize(
         "address",
-        ["10.0.0.1", "192.168.1.1", "100.64.0.1", "169.254.1.1", "127.0.0.1", "not-an-ip", "::1"],
+        [
+            "10.0.0.1",
+            "192.168.1.1",
+            "100.64.0.1",
+            "169.254.1.1",
+            "127.0.0.1",
+            "not-an-ip",
+            "::1",
+            "224.0.0.1",
+            "0.0.0.0",
+            "240.0.0.1",
+            "255.255.255.255",
+        ],
     )
     @respx.mock
     def test_non_public_address_is_skipped(
@@ -135,6 +147,19 @@ class TestOPNsenseClient:
 
         with OPNsenseClient(opnsense_config) as client:
             assert client.get_interface_ips() == {"wan2": "5.6.7.8"}
+
+    @pytest.mark.parametrize("address", ["224.0.0.1", "0.0.0.0", "127.0.0.1", "255.255.255.255"])
+    @respx.mock
+    def test_never_a_host_address_even_when_private_is_allowed(
+        self, opnsense_config: OPNsenseConfig, address: str
+    ) -> None:
+        response = {"wan": {"ipv4": [{"ipaddr": address}]}, "opt1": {"ipaddr": "10.0.0.2"}}
+        respx.get("https://opnsense.local/api/diagnostics/interface/getInterfaceConfig").mock(
+            return_value=httpx.Response(200, json=response)
+        )
+
+        with OPNsenseClient(opnsense_config, allow_private_ips=True) as client:
+            assert client.get_interface_ips() == {"wan2": "10.0.0.2"}
 
     @respx.mock
     def test_private_address_allowed_by_setting(self, opnsense_config: OPNsenseConfig) -> None:

@@ -16,6 +16,8 @@ def _publishable(address: str, allow_private: bool) -> bool:
         parsed = ipaddress.IPv4Address(address)
     except ValueError:
         return False
+    if parsed.is_multicast or parsed.is_unspecified or parsed.is_reserved or parsed.is_loopback:
+        return False  # never a host address, whatever allow_private says
     return allow_private or parsed.is_global
 
 

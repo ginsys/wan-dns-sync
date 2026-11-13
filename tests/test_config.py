@@ -237,5 +237,3 @@ class TestValidation:
     def test_kubernetes_unknown_interface(self) -> None:
         with pytest.raises(ValidationError, match="kubernetes.interfaces"):
             make_config(kubernetes={"enabled": True, "label_selector": "a=b", "interfaces": ["x"]})
-
-

@@ -10,6 +10,7 @@ import pytest
 from kubernetes.client import ApiClient
 from kubernetes.client.exceptions import ApiException
 from structlog.testing import capture_logs
+from urllib3.exceptions import ReadTimeoutError
 
 from wan_dns_sync.kubernetes_updater import (
     STALE_ANNOTATION_KEYS,
@@ -235,6 +236,30 @@ class TestUpdateApexDnsAnnotations:
                 return_value=custom_api,
             ),
             pytest.raises(KubernetesUpdateError, match="ingress"),
+        ):
+            update_apex_dns_annotations(["5.6.7.8", "1.2.3.4"], SELECTOR)
+
+        assert_patched(custom_api.patch_namespaced_custom_object)
+
+    def test_a_transport_error_on_ingresses_does_not_stop_the_httproutes(self) -> None:
+        """urllib3 errors are not ApiExceptions and the client does not wrap them."""
+        networking_api = make_networking_api(None)
+        networking_api.list_ingress_for_all_namespaces.side_effect = ReadTimeoutError(
+            None, "/apis/networking.k8s.io/v1/ingresses", "read timed out"
+        )
+        custom_api = make_custom_api(None)
+
+        with (
+            patch("wan_dns_sync.kubernetes_updater.config.load_incluster_config"),
+            patch(
+                "wan_dns_sync.kubernetes_updater.client.NetworkingV1Api",
+                return_value=networking_api,
+            ),
+            patch(
+                "wan_dns_sync.kubernetes_updater.client.CustomObjectsApi",
+                return_value=custom_api,
+            ),
+            pytest.raises(KubernetesUpdateError, match="ReadTimeoutError while updating ingresses"),
         ):
             update_apex_dns_annotations(["5.6.7.8", "1.2.3.4"], SELECTOR)
 

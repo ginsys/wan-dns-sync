@@ -1,6 +1,6 @@
 [project]
 name = "wan-dns-sync"
-version = "0.4.0"
+version = "1.0.0"
 description = "Sync OPNsense WAN interface IPs to DNS A records through octoDNS providers"
 readme = "README.md"
 requires-python = ">=3.12"

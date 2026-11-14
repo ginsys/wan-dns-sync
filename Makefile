@@ -68,7 +68,7 @@ run: $(VENV)/bin/activate
 	$(VENV)/bin/wan-dns-sync --config config.example.yaml --once --dry-run --log-level debug
 
 test-run: build
-	@test -f .env || (echo "Error: .env file not found. Copy .env.example to .env and fill in values." && exit 1)
+	@test -f .env || (echo "Error: .env file not found. Put OPNSENSE_API_KEY, OPNSENSE_API_SECRET and HCLOUD_TOKEN in .env." && exit 1)
 	docker run --rm -it \
 		--env-file .env \
 		-v $(PWD)/config.test.yaml:/etc/wan-dns-sync/config.yaml:ro \
